@@ -1839,7 +1839,44 @@ emit_sri_vector (MonoCompile *cfg, MonoMethod *cmethod, MonoMethodSignature *fsi
 		}
 		return result_ins;
 #elif defined(TARGET_AMD64)
-		return NULL;
+		//MonoCPUFeatures feature = type_enum_is_float (element_type) ? MONO_CPU_X86_SSE3 : MONO_CPU_X86_SSSE3;
+		//if (!is_SIMD_feature_supported (cfg, feature))
+		//	return NULL;	
+
+		// Byte -- NI_SSE2_MoveMask (OP_SSE_MOVMSK)
+		// Short -- NI_SSSE3_Shuffle, NI_SSE2_MoveMask
+		// Int/Float -- NI_SSE_MoveMask
+		// Long/Double -- NI_SSE2_MoveMask
+	/*
+		switch (arg0_type) {
+			case MONO_TYPE_U1:
+			case MONO_TYPE_I1: {
+				opcode = 
+				break;
+			}
+			case MONO_TYPE_U2:
+			case MONO_TYPE_I2: {
+				return NULL;
+				break;
+			}
+			case MONO_TYPE_U4:
+			case MONO_TYPE_I4:
+			case MONO_TYPE_R4: {
+				break;
+			}
+			case MONO_TYPE_U8:
+			case MONO_TYPE_I8:
+			case MONO_TYPE_R8: {
+				break;
+			}
+		}*/
+
+		if (arg0_type == MONO_TYPE_I2 || arg0_type == MONO_TYPE_U2) {
+			return NULL;
+		}
+	
+
+		return emit_simd_ins (cfg, klass, OP_SSE_MOVMSK, args [0]->dreg, args [0]->dreg);
 #endif
 	}
 	case SN_GetElement: {

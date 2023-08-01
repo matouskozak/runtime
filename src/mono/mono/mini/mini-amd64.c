@@ -6770,6 +6770,19 @@ mono_arch_output_basic_block (MonoCompile *cfg, MonoBasicBlock *bb)
 			}
 			break;
 		}
+		case OP_SSE_MOVMSK:
+			switch (ins->inst_c1) {
+			case MONO_TYPE_R4:
+				amd64_sse_movmskps_reg_reg (code, ins->dreg, ins->sreg1);
+				break;
+			case MONO_TYPE_R8:
+				amd64_sse_movmskpd_reg_reg (code, ins->dreg, ins->sreg1);
+				break;
+			default:
+				amd64_sse_pmovmskb_reg_reg (code, ins->dreg, ins->sreg1);
+				break;
+			}
+			break;
 		case OP_SSE41_DPPS_IMM:
 			amd64_sse_dpps_reg_reg (code, ins->dreg, ins->sreg2, ins->inst_c0);
 			break;

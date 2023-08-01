@@ -947,6 +947,10 @@ typedef union {
 
 #define amd64_sse_pmovmskb_reg_reg(inst,dreg,reg) emit_sse_reg_reg((inst), (dreg), (reg), 0x66, 0x0f, 0xd7)
 
+#define amd64_sse_movmskps_reg_reg(inst,dreg,reg) emit_sse_reg_reg_op2((inst), (dreg), (reg), 0x0f, 0x50)
+
+#define amd64_sse_movmskpd_reg_reg(inst,dreg,reg) emit_sse_reg_reg((inst), (dreg), (reg), 0x66, 0x0f, 0x50)
+
 
 #define amd64_sse_pand_reg_reg(inst, dreg, reg) emit_sse_reg_reg((inst), (dreg), (reg), 0x66, 0x0f, 0xdb)
 

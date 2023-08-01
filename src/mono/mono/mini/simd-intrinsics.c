@@ -1869,14 +1869,36 @@ emit_sri_vector (MonoCompile *cfg, MonoMethod *cmethod, MonoMethodSignature *fsi
 			case MONO_TYPE_R8: {
 				break;
 			}
-		}*/
+		}
+		*/
+		//MonoClass* arg_class = mono_class_from_mono_type_internal (fsig->params [0]);
 
 		if (arg0_type == MONO_TYPE_I2 || arg0_type == MONO_TYPE_U2) {
 			return NULL;
 		}
 	
+		int type = MONO_TYPE_I1;
+		switch (arg0_type) {
+			case MONO_TYPE_U4:
+			case MONO_TYPE_I4:
+			case MONO_TYPE_R4: {
+				type = MONO_TYPE_R4;
+				break;
+			}
+			case MONO_TYPE_U8:
+			case MONO_TYPE_I8:
+			case MONO_TYPE_R8: {
+				type = MONO_TYPE_R8;
+				break;
+			}
+		}
 
-		return emit_simd_ins (cfg, klass, OP_SSE_MOVMSK, args [0]->dreg, args [0]->dreg);
+		MonoInst *result_ins = emit_simd_ins_for_sig (cfg, klass, OP_SSE_MOVMSK, -1, type, fsig, args);
+		
+
+
+		return result_ins;
+		//return emit_simd_ins (cfg, klass, OP_SSE_MOVMSK OP_EXTRACT_MASK , args [0]->dreg, args [0]->dreg);
 #endif
 	}
 	case SN_GetElement: {

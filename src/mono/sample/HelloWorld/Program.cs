@@ -28,7 +28,22 @@ namespace HelloWorld
             return Vector128.ExtractMostSignificantBits(vecShort);
         }
 
+        static Vector128<ushort> vecUShort = Vector128.Create(
+                0x0001,
+                0x8000,
+                0x0001,
+                0x8000,
+                0x0001,
+                0x8000,
+                0x0001,
+                0x8000
+            );
 
+        [MethodImplAttribute(MethodImplOptions.NoInlining)]
+        private static uint TestUShort()
+        {
+            return Vector128.ExtractMostSignificantBits(vecUShort);
+        }
 /*
 
         [MethodImplAttribute(MethodImplOptions.NoInlining)]
@@ -173,6 +188,14 @@ namespace HelloWorld
             if (resShort != 0b10101010u)
                 throw new Exception("TestShort failed");
 
+            Console.WriteLine("Test UShort");
+            Console.WriteLine(vecUShort);
+            uint resUShort = TestUShort();
+            Console.WriteLine(Convert.ToString(0b10101010u, 2));
+            Console.WriteLine(Convert.ToString(resUShort, 2));
+
+            if (resUShort != 0b10101010u)
+                throw new Exception("TestShort failed");
 
 /*
             Console.WriteLine("Test Byte");

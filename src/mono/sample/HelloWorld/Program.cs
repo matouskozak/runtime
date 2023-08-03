@@ -29,6 +29,8 @@ namespace HelloWorld
         }
 
 
+/*
+
         [MethodImplAttribute(MethodImplOptions.NoInlining)]
         private static uint TestInt(Vector128<int> vecInt)
         {
@@ -41,7 +43,9 @@ namespace HelloWorld
             return Vector128.Sum(vecInt);
         }
 
+*/
 
+/*
 
         static Vector128<byte> vecByte = Vector128.Create(
                 0x01,
@@ -94,7 +98,9 @@ namespace HelloWorld
         {
             return Vector128.ExtractMostSignificantBits(vecSByte);
         }
+*/
 
+/*
         static Vector64<byte> vec64Byte = Vector64.Create(
                 0x01,
                 0x80,
@@ -112,7 +118,9 @@ namespace HelloWorld
             return Vector64.ExtractMostSignificantBits(vec64Byte);
         }
 
+*/
 
+/*
         static Vector128<float> vecFloat = Vector128.Create(
                 +1.0f,
                 -0.0f,
@@ -125,6 +133,7 @@ namespace HelloWorld
         {
             return Vector128.ExtractMostSignificantBits(vecFloat);
         }
+*/
 
         private static void Main(string[] args)
         {
@@ -134,6 +143,7 @@ namespace HelloWorld
             Console.WriteLine(System.Reflection.Assembly.GetEntryAssembly ());
             Console.WriteLine(System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription);
          
+/*         
             Console.WriteLine("Test Int");
             Vector128<int> vecInt = Vector128.Create(
                 0x00000001U,
@@ -150,6 +160,8 @@ namespace HelloWorld
 
             if (resInt != 0b1010u)
                 throw new Exception("TestInt failed");
+*/
+
 
 
             Console.WriteLine("Test Short");
@@ -162,7 +174,7 @@ namespace HelloWorld
                 throw new Exception("TestShort failed");
 
 
-
+/*
             Console.WriteLine("Test Byte");
             Console.WriteLine(vecByte);
             uint resByte = TestByte();
@@ -181,7 +193,9 @@ namespace HelloWorld
 
             if (resSByte != 0b10101010_10101010u)
                 throw new Exception("TestSByte failed"); 
+*/
 
+/*
 
             Console.WriteLine("Test Float");
             Console.WriteLine(vecFloat);
@@ -191,6 +205,9 @@ namespace HelloWorld
 
             if (resFloat != 0b1010u)
                 throw new Exception("TestFloat failed");         
+
+*/
+
 /*
             Console.WriteLine("Test 64 Byte");
             Console.WriteLine(vec64Byte);

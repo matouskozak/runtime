@@ -1844,11 +1844,18 @@ emit_sri_vector (MonoCompile *cfg, MonoMethod *cmethod, MonoMethodSignature *fsi
 		switch (arg0_type) {
 			case MONO_TYPE_U2:
 			case MONO_TYPE_I2: {
+				type = type_enum_is_unsigned (arg0_type) ? MONO_TYPE_U1 : MONO_TYPE_I1;
+				MonoClass* arg_class = mono_class_from_mono_type_internal (fsig->params [0]);
+
 				guint64 shuffle_mask[2];
-				shuffle_mask[0] = 0x0F0D0B0907050301; // 00001111 00001101 00001011 00001001 00000111 00000101 00000011 00000001
-				shuffle_mask[1] = 0x8080808080808080; // 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000
-				MonoInst* shuffle_vec = emit_xconst_v128 (cfg, klass, (guint8*)shuffle_mask);
+				shuffle_mask[0] = 0x0F0D0B0907050301; // Place odd bytes in the lower half of vector
+				shuffle_mask[1] = 0x8080808080808080; // Zero the upper half
+				
+				MonoInst* shuffle_vec = emit_xconst_v128 (cfg, arg_class, (guint8*)shuffle_mask);
+				shuffle_vec->klass = arg_class;
+
 				args [0] = emit_simd_ins (cfg, klass, OP_SSSE3_SHUFFLE, args [0]->dreg, shuffle_vec->dreg);
+				args [0]->inst_c1 = type;
 				break;
 			}
 #if TARGET_SIZEOF_VOID_P == 4

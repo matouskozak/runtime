@@ -470,6 +470,10 @@ convert_attr (AttrKind kind)
 		return Attribute::ByVal;
 	case LLVM_ATTR_UW_TABLE:
 		return Attribute::UWTable;
+	case LLVM_ATTR_SWIFT_ERROR:
+		return Attribute::SwiftError;
+	case LLVM_ATTR_SWIFT_SELF:
+		return Attribute::SwiftSelf;
 	default:
 		assert (0);
 		return Attribute::NoUnwind;

@@ -654,7 +654,11 @@ typedef enum {
 	 * type as the element.
 	 * esize is the size of the value.
 	 */
-	LLVMArgWasmVtypeAsScalar
+	LLVMArgWasmVtypeAsScalar,
+	/* SwiftError */
+	LLVMArgSwiftError,
+	/* SwiftSelf */
+	LLVMArgSwiftSelf
 } LLVMArgStorage;
 
 typedef struct {

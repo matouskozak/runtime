@@ -4362,7 +4362,8 @@ is_supported_callconv (EmitContext *ctx, MonoCallInst *call)
 			  (call->signature->call_convention == MONO_CALL_C) ||
 			  (call->signature->call_convention == MONO_CALL_STDCALL);
 #else
-	gboolean result = (call->signature->call_convention == MONO_CALL_DEFAULT) || ((call->signature->call_convention == MONO_CALL_C) && ctx->llvm_only);
+	gboolean result = (call->signature->call_convention == MONO_CALL_DEFAULT) || 
+			(((call->signature->call_convention == MONO_CALL_C) || (call->signature->call_convention == MONO_CALL_SWIFTCALL)) && ctx->llvm_only);
 #endif
 	return result;
 }
@@ -4660,7 +4661,7 @@ process_call (EmitContext *ctx, MonoBasicBlock *bb, LLVMBuilderRef *builder_ref,
 			g_assert (addresses [reg]);
 			args [pindex] = addresses [reg]->value;
 			break;
-		case LLVMArgVtypeAddr :
+		case LLVMArgVtypeAddr:
 		case LLVMArgVtypeByRef: {
 			g_assert (addresses [reg]);
 			args [pindex] = convert (ctx, addresses [reg]->value, pointer_type (type_to_llvm_arg_type (ctx, ainfo->type)));
@@ -12597,6 +12598,9 @@ emit_method_inner (EmitContext *ctx)
 	if (!cfg->llvm_only)
 		LLVMSetFunctionCallConv (method, LLVMMono1CallConv);
 
+	if (sig->call_convention == MONO_CALL_SWIFTCALL)
+		LLVMSetFunctionCallConv(method, LLVMSwiftCallConv);
+
 	/* if the method doesn't contain
 	 *  (1) a call (so it's a leaf method)
 	 *  (2) and no loops
@@ -12755,6 +12759,10 @@ emit_method_inner (EmitContext *ctx)
 
 		if (ainfo->storage == LLVMArgVtypeInReg && ainfo->pair_storage [0] == LLVMArgNone && ainfo->pair_storage [1] == LLVMArgNone)
 			continue;
+
+		if (ainfo->storage == LLVMArgSwiftError) {
+			mono_llvm_add_param_attr (LLVMGetParam (method, pindex), LLVM_ATTR_SWIFT_ERROR);
+		}
 
 		values [cfg->args [i + sig->hasthis]->dreg] = LLVMGetParam (method, pindex);
 		if (ainfo->storage == LLVMArgGsharedvtFixed || ainfo->storage == LLVMArgGsharedvtFixedVtype) {
@@ -13287,7 +13295,8 @@ mono_llvm_emit_call (MonoCompile *cfg, MonoCallInst *call)
 
 		/* Simply remember the arguments */
 		switch (ainfo->storage) {
-		case LLVMArgNormal: {
+		case LLVMArgNormal:
+		case LLVMArgSwiftError: {
 			MonoType *t = (sig->hasthis && i == 0) ? m_class_get_byval_arg (mono_get_intptr_class ()) : ainfo->type;
 			int opcode;
 

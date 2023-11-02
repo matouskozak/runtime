@@ -2996,6 +2996,12 @@ mono_arch_get_llvm_call_info (MonoCompile *cfg, MonoMethodSignature *sig)
 		case ArgInSIMDReg:
 			lainfo->storage = LLVMArgVtypeInSIMDReg;
 			break;
+		case ArgSwiftError:
+			lainfo->storage = LLVMArgSwiftError;
+			break;
+		case ArgSwiftSelf:
+			lainfo->storage = LLVMArgSwiftSelf;
+			break;
 		default:
 			g_assert_not_reached ();
 			break;

@@ -115,56 +115,89 @@ export function mono_wasm_index_of(culture: MonoStringRef, needlePtr: number, ne
         const locale = cultureName ? cultureName : undefined;
         const casePicker = (options & 0x1f);
 
+//         needle "A\u0300A\u0300"
+// source "aba\u0300A\u0300A\u0300A\u0300"
+// locale e.g. "cs", options/casepicker None/0
+
+        // Improvement ~ 1450ms
+        let result = -1;
         const segmenter = new Intl.Segmenter(locale, { granularity: "grapheme" });
         const needleSegments = Array.from(segmenter.segment(needle)).map(s => s.segment);
-        let i = 0;
-        let stop = false;
-        let result = -1;
-        let segmentWidth = 0;
-        let index = 0;
-        let nextIndex = 0;
-        while (!stop) {
-            // we need to restart the iterator in this outer loop because we have shifted it in the inner loop
-            const iteratorSrc = segmenter.segment(source.slice(i, source.length))[Symbol.iterator]();
-            let srcNext = iteratorSrc.next();
+        const sourceIterator = segmenter.segment(source)[Symbol.iterator]();
+        
+        for (let sourceSegment = sourceIterator.next(); !sourceSegment.done; sourceSegment = sourceIterator.next()) {
+            if (!check_match_found(sourceSegment.value.segment, needleSegments[0], locale, casePicker))
+                continue;
 
-            if (srcNext.done)
-                break;
-
-            let matchFound = check_match_found(srcNext.value.segment, needleSegments[0], locale, casePicker);
-            index = nextIndex;
-            srcNext = iteratorSrc.next();
-            if (srcNext.done) {
-                result = matchFound ? index : result;
-                break;
-            }
-            segmentWidth = srcNext.value.index;
-            nextIndex = index + segmentWidth;
-            if (matchFound) {
-                for (let j = 1; j < needleSegments.length; j++) {
-                    if (srcNext.done) {
-                        stop = true;
-                        break;
-                    }
-                    matchFound = check_match_found(srcNext.value.segment, needleSegments[j], locale, casePicker);
-                    if (!matchFound)
-                        break;
-
-                    srcNext = iteratorSrc.next();
+            const matchIterator = segmenter.segment(source.slice(sourceSegment.value.index + sourceSegment.value.segment.length, sourceSegment.value.index + 2*needle.length + 1))[Symbol.iterator]();
+            let j;
+            for (j = 1; j < needleSegments.length; j++) {
+                const srcNext = matchIterator.next();
+                if (srcNext.done) {
+                    break;
                 }
-                if (stop)
+                if (!check_match_found(srcNext.value.segment, needleSegments[j], locale, casePicker))
                     break;
             }
-
-            if (matchFound) {
-                result = index;
+            if (j == needleSegments.length) {
+                result = sourceSegment.value.index;
                 if (fromBeginning)
                     break;
             }
-            i = nextIndex;
         }
         wrap_no_error_root(is_exception, exceptionRoot);
         return result;
+
+        // const segmenter = new Intl.Segmenter(locale, { granularity: "grapheme" });
+        // const needleSegments = Array.from(segmenter.segment(needle)).map(s => s.segment);
+        // let i = 0;
+        // let stop = false;
+        // let result = -1;
+        // let segmentWidth = 0;
+        // let index = 0;
+        // let nextIndex = 0;
+        // while (!stop) {
+        //     // we need to restart the iterator in this outer loop because we have shifted it in the inner loop
+        //     const iteratorSrc = segmenter.segment(source.slice(i, source.length))[Symbol.iterator]();
+        //     let srcNext = iteratorSrc.next();
+
+        //     if (srcNext.done)
+        //         break;
+
+        //     let matchFound = check_match_found(srcNext.value.segment, needleSegments[0], locale, casePicker);
+        //     index = nextIndex;
+        //     srcNext = iteratorSrc.next();
+        //     if (srcNext.done) {
+        //         result = matchFound ? index : result;
+        //         break;
+        //     }
+        //     segmentWidth = srcNext.value.index;
+        //     nextIndex = index + segmentWidth;
+        //     if (matchFound) {
+        //         for (let j = 1; j < needleSegments.length; j++) {
+        //             if (srcNext.done) {
+        //                 stop = true;
+        //                 break;
+        //             }
+        //             matchFound = check_match_found(srcNext.value.segment, needleSegments[j], locale, casePicker);
+        //             if (!matchFound)
+        //                 break;
+
+        //             srcNext = iteratorSrc.next();
+        //         }
+        //         if (stop)
+        //             break;
+        //     }
+
+        //     if (matchFound) {
+        //         result = index;
+        //         if (fromBeginning)
+        //             break;
+        //     }
+        //     i = nextIndex;
+        // }
+        // wrap_no_error_root(is_exception, exceptionRoot);
+        // return result;
     }
     catch (ex: any) {
         wrap_error_root(is_exception, ex, exceptionRoot);

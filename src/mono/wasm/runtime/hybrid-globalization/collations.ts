@@ -115,9 +115,9 @@ export function mono_wasm_index_of(culture: MonoStringRef, needlePtr: number, ne
         const locale = cultureName ? cultureName : undefined;
         const casePicker = (options & 0x1f);
 
-//         needle "A\u0300A\u0300"
-// source "aba\u0300A\u0300A\u0300A\u0300"
-// locale e.g. "cs", options/casepicker None/0
+        // needle "A\u0300A\u0300"
+        // source "aba\u0300A\u0300A\u0300A\u0300"
+        // locale e.g. "cs", options/casepicker None/0
 
         // Improvement ~ 1450ms
         let result = -1;

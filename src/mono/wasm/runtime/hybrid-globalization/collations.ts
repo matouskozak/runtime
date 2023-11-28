@@ -119,34 +119,101 @@ export function mono_wasm_index_of(culture: MonoStringRef, needlePtr: number, ne
         // source "aba\u0300A\u0300A\u0300A\u0300"
         // locale e.g. "cs", options/casepicker None/0
 
-        // Improvement ~ 1450ms
+        // TODO Grapheme segmentation
         let result = -1;
-        const segmenter = new Intl.Segmenter(locale, { granularity: "grapheme" });
-        const needleSegments = Array.from(segmenter.segment(needle)).map(s => s.segment);
-        const sourceIterator = segmenter.segment(source)[Symbol.iterator]();
-        
-        for (let sourceSegment = sourceIterator.next(); !sourceSegment.done; sourceSegment = sourceIterator.next()) {
-            if (!check_match_found(sourceSegment.value.segment, needleSegments[0], locale, casePicker))
-                continue;
+        const needleSegments = [];
+        let needleIdx = 0;
 
-            const matchIterator = segmenter.segment(source.slice(sourceSegment.value.index + sourceSegment.value.segment.length, sourceSegment.value.index + 2*needle.length + 1))[Symbol.iterator]();
+        while (needleIdx < needle.length) {
+            const breakIdx = next_grapheme_break(needle, needleIdx);
+            needleSegments.push(needle.slice(needleIdx, breakIdx));
+            needleIdx = breakIdx;
+        }
+
+        if (needleIdx < needle.length) {
+            needleSegments.push(needle.slice(needleIdx));
+        }
+
+        let srcIdx = 0;
+        while (srcIdx < source.length) {
+            const breakIdx = next_grapheme_break(source, srcIdx);
+            const srcGrapheme = source.slice(srcIdx, breakIdx);
+            srcIdx = breakIdx;
+
+            if (!check_match_found(srcGrapheme, needleSegments[0], locale, casePicker)) {
+                continue;
+            }
+
             let j;
             for (j = 1; j < needleSegments.length; j++) {
-                const srcNext = matchIterator.next();
-                if (srcNext.done) {
+                let srcNextIdx = srcIdx;
+                const breakIdx = next_grapheme_break(source, srcNextIdx);
+                const srcGrapheme = source.slice(srcNextIdx, breakIdx);
+
+                if (!check_match_found(srcGrapheme, needleSegments[j], locale, casePicker)) {
                     break;
                 }
-                if (!check_match_found(srcNext.value.segment, needleSegments[j], locale, casePicker))
-                    break;
+                srcNextIdx = breakIdx;
             }
             if (j == needleSegments.length) {
-                result = sourceSegment.value.index;
+                result = srcIdx - srcGrapheme.length;
                 if (fromBeginning)
                     break;
             }
         }
         wrap_no_error_root(is_exception, exceptionRoot);
         return result;
+
+        // Naive speedy algo
+        // let result = -1;
+        
+        // for (let i = 0; i <= source.length - needle.length; i++) {
+        //     if (!check_match_found(source[i], needle[0], locale, casePicker))
+        //         continue;
+
+        //     let j;
+        //     for (j = 1; j < needle.length; j++) {
+        //         if (!check_match_found(source[i + j], needle[j], locale, casePicker))
+        //             break;
+        //     }
+        //     if (j == needle.length) {
+        //         result = i;
+        //         if (fromBeginning)
+        //             break;
+        //     }
+        // }
+        // wrap_no_error_root(is_exception, exceptionRoot);
+        // return result;
+
+        // Improvement ~ 1450ms
+        // let result = -1;
+        // const segmenter = new Intl.Segmenter(locale, { granularity: "grapheme" });
+        // //const segmenter = new Intl.Segmenter(); // Locale probably not needed for grapheme segmentation
+        // const needleSegments = Array.from(segmenter.segment(needle)).map(s => s.segment);
+        // const sourceIterator = segmenter.segment(source)[Symbol.iterator]();
+        
+        // for (let sourceSegment = sourceIterator.next(); !sourceSegment.done; sourceSegment = sourceIterator.next()) {
+        //     if (!check_match_found(sourceSegment.value.segment, needleSegments[0], locale, casePicker))
+        //         continue;
+
+        //     const matchIterator = segmenter.segment(source.slice(sourceSegment.value.index + sourceSegment.value.segment.length, sourceSegment.value.index + 2*needle.length + 1))[Symbol.iterator]();
+        //     let j;
+        //     for (j = 1; j < needleSegments.length; j++) {
+        //         const srcNext = matchIterator.next();
+        //         if (srcNext.done) {
+        //             break;
+        //         }
+        //         if (!check_match_found(srcNext.value.segment, needleSegments[j], locale, casePicker))
+        //             break;
+        //     }
+        //     if (j == needleSegments.length) {
+        //         result = sourceSegment.value.index;
+        //         if (fromBeginning)
+        //             break;
+        //     }
+        // }
+        // wrap_no_error_root(is_exception, exceptionRoot);
+        // return result;
 
         // const segmenter = new Intl.Segmenter(locale, { granularity: "grapheme" });
         // const needleSegments = Array.from(segmenter.segment(needle)).map(s => s.segment);
@@ -313,4 +380,115 @@ function decode_to_clean_string(strPtr: number, strLen: number) {
 function clean_string(str: string) {
     const nStr = str.normalize();
     return nStr.replace(/[\u200B-\u200D\uFEFF\0]/g, "");
+}
+
+// Gets a code point from a UTF-16 string
+// handling surrogate pairs appropriately
+function get_codepoint(str: string, idx: number) {
+    let hi, low;
+    const code = str.charCodeAt(idx);
+  
+    // High surrogate
+    if (0xD800 <= code && code <= 0xDBFF) {
+        hi = code;
+        low = str.charCodeAt(idx + 1);
+        if (0xDC00 <= low && low <= 0xDFFF) {
+            return ((hi - 0xD800) * 0x400) + (low - 0xDC00) + 0x10000;
+        }
+  
+        return hi;
+    }
+  
+    // Low surrogate
+    if (0xDC00 <= code && code <= 0xDFFF) {
+        hi = str.charCodeAt(idx - 1);
+        low = code;
+        if (0xD800 <= hi && hi <= 0xDBFF) {
+            return ((hi - 0xD800) * 0x400) + (low - 0xDC00) + 0x10000;
+        }
+  
+        return low;
+    }
+  
+    return code;
+}
+
+function next_grapheme_break(str: string, startIndex: number) {
+    if (startIndex < 0)
+        return 0;
+
+    if (startIndex >= str.length - 1)
+        return str.length;
+
+    let prev = get_codepoint(str, startIndex);
+    for (let i = startIndex + 1; i < str.length; i++) {
+        // check if is surrogate pair
+        let high, low;
+        if ((0xd800 <= (high = str.charCodeAt(i - 1)) && high <= 0xdbff) &&
+            (0xdc00 <= (low = str.charCodeAt(i)) && low <= 0xdfff)) {
+            continue;
+        }
+
+        const next = get_codepoint(str, i);
+        if (is_grapheme_break(prev, next))
+            return i;
+
+        prev = next;
+    }
+
+    return str.length;
+}
+
+
+// TODO: rewrite code below using data from https://github.com/formatjs/formatjs/blob/58d6a7b398d776ca3d2726d72ae1573b65cc3bef/packages/intl-segmenter/src/cldr-segmentation-rules.generated.ts#L953-L1037
+// TODO: iterate over the rules and match previous/current (follow source code from Intl.Segmenter)
+const CR = 1, LF = 2, Control = 3, Extend = 4, Regional_Indicator = 5, SpacingMark = 6, L = 7, V = 8, T = 9, LV = 10, LVT = 11;
+
+// Returns whether a break is allowed between the
+// two given grapheme breaking classes
+function is_grapheme_break(previous: number, current: number) {
+    // GB3. CR X LF
+    if ((previous === CR) && (current === LF)) {
+        return false;
+  
+    // GB4. (Control|CR|LF) ÷
+    } else if ([Control, CR, LF].includes(previous)) {
+        return true;
+  
+    // GB5. ÷ (Control|CR|LF)
+    } else if ([Control, CR, LF].includes(current)) {
+        return true;
+  
+    // GB6. L X (L|V|LV|LVT)
+    } else if ((previous === L) && [L, V, LV, LVT].includes(current)) {
+        return false;
+  
+    // GB7. (LV|V) X (V|T)
+    } else if ([LV, V].includes(previous) && [V, T].includes(current)) {
+        return false;
+  
+    // GB8. (LVT|T) X (T)
+    } else if ([LVT, T].includes(previous) && (current === T)) {
+        return false;
+  
+    // GB8a. Regional_Indicator X Regional_Indicator
+    } else if ((previous === Regional_Indicator) && (current === Regional_Indicator)) {
+        return false;
+  
+    // GB9. X Extend
+    } else if (current === Extend) {
+        return false;
+  
+    // GB9a. X SpacingMark
+    } else if (current === SpacingMark) {
+        return false;
+    }
+  
+    // GB9b. Prepend X (there are currently no characters with this class)
+    //else if (previous === Prepend) {
+    //  return false;
+    //}
+  
+    // GB10. Any ÷ Any
+    return true;
 }

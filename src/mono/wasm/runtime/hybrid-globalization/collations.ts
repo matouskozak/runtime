@@ -6,6 +6,7 @@ import { monoStringToString, utf16ToString } from "../strings";
 import { MonoObject, MonoObjectRef, MonoString, MonoStringRef } from "../types/internal";
 import { Int32Ptr } from "../types/emscripten";
 import { wrap_error_root, wrap_no_error_root } from "../invoke-js";
+import { GraphemeBreaker } from "./segmenter";
 
 const COMPARISON_ERROR = -2;
 const INDEXING_ERROR = -1;
@@ -120,23 +121,20 @@ export function mono_wasm_index_of(culture: MonoStringRef, needlePtr: number, ne
         // locale e.g. "cs", options/casepicker None/0
 
         // TODO Grapheme segmentation
+        const graphemeBreaker = new GraphemeBreaker();
         let result = -1;
         const needleSegments = [];
         let needleIdx = 0;
 
         while (needleIdx < needle.length) {
-            const breakIdx = next_grapheme_break(needle, needleIdx);
+            const breakIdx = graphemeBreaker.next_grapheme_break(needle, needleIdx);
             needleSegments.push(needle.slice(needleIdx, breakIdx));
             needleIdx = breakIdx;
         }
 
-        if (needleIdx < needle.length) {
-            needleSegments.push(needle.slice(needleIdx));
-        }
-
         let srcIdx = 0;
         while (srcIdx < source.length) {
-            const breakIdx = next_grapheme_break(source, srcIdx);
+            const breakIdx = graphemeBreaker.next_grapheme_break(source, srcIdx);
             const srcGrapheme = source.slice(srcIdx, breakIdx);
             srcIdx = breakIdx;
 
@@ -145,9 +143,9 @@ export function mono_wasm_index_of(culture: MonoStringRef, needlePtr: number, ne
             }
 
             let j;
+            let srcNextIdx = srcIdx;
             for (j = 1; j < needleSegments.length; j++) {
-                let srcNextIdx = srcIdx;
-                const breakIdx = next_grapheme_break(source, srcNextIdx);
+                const breakIdx = graphemeBreaker.next_grapheme_break(source, srcNextIdx);
                 const srcGrapheme = source.slice(srcNextIdx, breakIdx);
 
                 if (!check_match_found(srcGrapheme, needleSegments[j], locale, casePicker)) {
@@ -382,113 +380,56 @@ function clean_string(str: string) {
     return nStr.replace(/[\u200B-\u200D\uFEFF\0]/g, "");
 }
 
-// Gets a code point from a UTF-16 string
-// handling surrogate pairs appropriately
-function get_codepoint(str: string, idx: number) {
-    let hi, low;
-    const code = str.charCodeAt(idx);
-  
-    // High surrogate
-    if (0xD800 <= code && code <= 0xDBFF) {
-        hi = code;
-        low = str.charCodeAt(idx + 1);
-        if (0xDC00 <= low && low <= 0xDFFF) {
-            return ((hi - 0xD800) * 0x400) + (low - 0xDC00) + 0x10000;
-        }
-  
-        return hi;
-    }
-  
-    // Low surrogate
-    if (0xDC00 <= code && code <= 0xDFFF) {
-        hi = str.charCodeAt(idx - 1);
-        low = code;
-        if (0xD800 <= hi && hi <= 0xDBFF) {
-            return ((hi - 0xD800) * 0x400) + (low - 0xDC00) + 0x10000;
-        }
-  
-        return low;
-    }
-  
-    return code;
-}
+// // TODO: rewrite using data from https://github.com/formatjs/formatjs/blob/58d6a7b398d776ca3d2726d72ae1573b65cc3bef/packages/intl-segmenter/src/cldr-segmentation-rules.generated.ts#L953-L1037
+// // TODO iterate over the rules and match previous/current
 
-function next_grapheme_break(str: string, startIndex: number) {
-    if (startIndex < 0)
-        return 0;
+// const CR = 1, LF = 2, Control = 3, Extend = 4, Regional_Indicator = 5, SpacingMark = 6, L = 7, V = 8, T = 9, LV = 10, LVT = 11;
 
-    if (startIndex >= str.length - 1)
-        return str.length;
-
-    let prev = get_codepoint(str, startIndex);
-    for (let i = startIndex + 1; i < str.length; i++) {
-        // check if is surrogate pair
-        let high, low;
-        if ((0xd800 <= (high = str.charCodeAt(i - 1)) && high <= 0xdbff) &&
-            (0xdc00 <= (low = str.charCodeAt(i)) && low <= 0xdfff)) {
-            continue;
-        }
-
-        const next = get_codepoint(str, i);
-        if (is_grapheme_break(prev, next))
-            return i;
-
-        prev = next;
-    }
-
-    return str.length;
-}
-
-
-// TODO: rewrite code below using data from https://github.com/formatjs/formatjs/blob/58d6a7b398d776ca3d2726d72ae1573b65cc3bef/packages/intl-segmenter/src/cldr-segmentation-rules.generated.ts#L953-L1037
-// TODO: iterate over the rules and match previous/current (follow source code from Intl.Segmenter)
-const CR = 1, LF = 2, Control = 3, Extend = 4, Regional_Indicator = 5, SpacingMark = 6, L = 7, V = 8, T = 9, LV = 10, LVT = 11;
-
-// Returns whether a break is allowed between the
-// two given grapheme breaking classes
-function is_grapheme_break(previous: number, current: number) {
-    // GB3. CR X LF
-    if ((previous === CR) && (current === LF)) {
-        return false;
+// // Returns whether a break is allowed between the
+// // two given grapheme breaking classes
+// function is_grapheme_break(previous: number, current: number) {
+//     // GB3. CR X LF
+//     if ((previous === CR) && (current === LF)) {
+//         return false;
   
-    // GB4. (Control|CR|LF) ÷
-    } else if ([Control, CR, LF].includes(previous)) {
-        return true;
+//     // GB4. (Control|CR|LF) ÷
+//     } else if ([Control, CR, LF].includes(previous)) {
+//         return true;
   
-    // GB5. ÷ (Control|CR|LF)
-    } else if ([Control, CR, LF].includes(current)) {
-        return true;
+//     // GB5. ÷ (Control|CR|LF)
+//     } else if ([Control, CR, LF].includes(current)) {
+//         return true;
   
-    // GB6. L X (L|V|LV|LVT)
-    } else if ((previous === L) && [L, V, LV, LVT].includes(current)) {
-        return false;
+//     // GB6. L X (L|V|LV|LVT)
+//     } else if ((previous === L) && [L, V, LV, LVT].includes(current)) {
+//         return false;
   
-    // GB7. (LV|V) X (V|T)
-    } else if ([LV, V].includes(previous) && [V, T].includes(current)) {
-        return false;
+//     // GB7. (LV|V) X (V|T)
+//     } else if ([LV, V].includes(previous) && [V, T].includes(current)) {
+//         return false;
   
-    // GB8. (LVT|T) X (T)
-    } else if ([LVT, T].includes(previous) && (current === T)) {
-        return false;
+//     // GB8. (LVT|T) X (T)
+//     } else if ([LVT, T].includes(previous) && (current === T)) {
+//         return false;
   
-    // GB8a. Regional_Indicator X Regional_Indicator
-    } else if ((previous === Regional_Indicator) && (current === Regional_Indicator)) {
-        return false;
+//     // GB8a. Regional_Indicator X Regional_Indicator
+//     } else if ((previous === Regional_Indicator) && (current === Regional_Indicator)) {
+//         return false;
   
-    // GB9. X Extend
-    } else if (current === Extend) {
-        return false;
+//     // GB9. X Extend
+//     } else if (current === Extend) {
+//         return false;
   
-    // GB9a. X SpacingMark
-    } else if (current === SpacingMark) {
-        return false;
-    }
+//     // GB9a. X SpacingMark
+//     } else if (current === SpacingMark) {
+//         return false;
+//     }
   
-    // GB9b. Prepend X (there are currently no characters with this class)
-    //else if (previous === Prepend) {
-    //  return false;
-    //}
+//     // GB9b. Prepend X (there are currently no characters with this class)
+//     //else if (previous === Prepend) {
+//     //  return false;
+//     //}
   
-    // GB10. Any ÷ Any
-    return true;
-}
+//     // GB10. Any ÷ Any
+//     return true;
+// }

@@ -59,32 +59,32 @@ function prepare_segmanation_rules(segmentationTypeValue: SegmentationTypeTypeRa
     return preparedRules;
 }
 
-/**
- * Retrieves the Unicode code point at the specified index in a string.
- * If the character at the index is a surrogate pair, it combines the surrogate pair to form the code point.
- * 
- * @param str - The string from which to retrieve the code point.
- * @param idx - The index of the character in the string.
- * @returns The Unicode code point at the specified index.
- */
-function get_codepoint(str: string, idx: number) {
-    let surrogate;;
-    const code = str.charCodeAt(idx);
+// /**
+//  * Retrieves the Unicode code point at the specified index in a string.
+//  * If the character at the index is a surrogate pair, it combines the surrogate pair to form the code point.
+//  * 
+//  * @param str - The string from which to retrieve the code point.
+//  * @param idx - The index of the character in the string.
+//  * @returns The Unicode code point at the specified index.
+//  */
+// function get_codepoint(str: string, idx: number) {
+//     let surrogate;
+//     const code = str.charCodeAt(idx);
   
-    if (0xD800 <= code && code <= 0xDBFF) { // High surrogate
-        surrogate = str.charCodeAt(idx + 1);
-        if (0xDC00 <= surrogate && surrogate <= 0xDFFF) {
-            return ((code - 0xD800) * 0x400) + (surrogate - 0xDC00) + 0x10000;
-        }
-    } else if (0xDC00 <= code && code <= 0xDFFF) {  // Low surrogate
-        surrogate = str.charCodeAt(idx - 1);
-        if (0xD800 <= surrogate && surrogate <= 0xDBFF) {
-            return ((surrogate - 0xD800) * 0x400) + (code - 0xDC00) + 0x10000;
-        }
-    }
+//     if (0xD800 <= code && code <= 0xDBFF) {  // High surrogate
+//         surrogate = str.charCodeAt(idx + 1);
+//         if (0xDC00 <= surrogate && surrogate <= 0xDFFF) {
+//             return ((code - 0xD800) * 0x400) + (surrogate - 0xDC00) + 0x10000;
+//         }
+//     } else if (0xDC00 <= code && code <= 0xDFFF) {   // Low surrogate
+//         surrogate = str.charCodeAt(idx - 1);
+//         if (0xD800 <= surrogate && surrogate <= 0xDBFF) {
+//             return ((surrogate - 0xD800) * 0x400) + (code - 0xDC00) + 0x10000;
+//         }
+//     }
   
-    return code;
-}
+//     return code;
+// }
 
 export class GraphemeSegmenter {
     private readonly rules;
@@ -115,7 +115,7 @@ export class GraphemeSegmenter {
             }
     
             //const next = String.fromCharCode(get_codepoint(str, i));
-            let next = String.fromCodePoint(str.codePointAt(i)!);
+            const next = String.fromCodePoint(str.codePointAt(i)!);
 
             if (this.is_grapheme_break(prev, next))
                 return i;
@@ -130,10 +130,10 @@ export class GraphemeSegmenter {
         for (const key of this.ruleSortedKeys) {
             const {before, after, breaks} = this.rules[key];
             if (before && !before.test(prev)) {
-                continue;  // match before rule failed
+                continue;   // match before rule failed
             }
             if (after && !after.test(next)) {
-                continue; // match after rule failed
+                continue;   // match after rule failed
             }
 
             return breaks;

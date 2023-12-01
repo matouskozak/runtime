@@ -129,11 +129,12 @@ export class GraphemeSegmenter {
     private is_grapheme_break(prev: string, next: string): boolean {
         for (const key of this.ruleSortedKeys) {
             const {before, after, breaks} = this.rules[key];
+            // match before and after rules
             if (before && !before.test(prev)) {
-                continue;   // match before rule failed
+                continue;
             }
             if (after && !after.test(next)) {
-                continue;   // match after rule failed
+                continue;
             }
 
             return breaks;

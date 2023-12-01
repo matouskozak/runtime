@@ -2,7 +2,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-// Reference for SegmentationRules https://github.com/formatjs/formatjs/blob/58d6a7b398d776ca3d2726d72ae1573b65cc3bef/packages/intl-segmenter/src/cldr-segmentation-rules.generated.ts#L953-L1037
+// Reference for SegmentationRules: https://github.com/formatjs/formatjs/blob/58d6a7b398d776ca3d2726d72ae1573b65cc3bef/packages/intl-segmenter/src/cldr-segmentation-rules.generated.ts#L953-L1037
 export const SegmentationRules = {
     "rules": {
         "11": {
@@ -85,4 +85,4 @@ export const SegmentationRules = {
         "$Virama": "[\\u094D\\u09CD\\u0ACD\\u0B4D\\u0C4D\\u0D4D]",
         "$ZWJ": "\\u200D"
     }
-}
+};

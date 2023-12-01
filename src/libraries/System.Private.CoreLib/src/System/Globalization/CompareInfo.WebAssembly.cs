@@ -98,9 +98,7 @@ namespace System.Globalization
             string cultureName = m_name;
             AssertIndexingSupported(options, cultureName);
 
-            int idx = -1;
-
-            if (source.Length == target.Length) { // TODO WIP Grapheme clustering c# side
+            int idx;
             if (_isAsciiEqualityOrdinal && CanUseAsciiOrdinalForOptions(options))
             {
                 idx = (options & CompareOptions.IgnoreCase) != 0 ?
@@ -115,52 +113,6 @@ namespace System.Globalization
                     idx = Interop.JsGlobalization.IndexOf(m_name, pTarget, target.Length, pSource, source.Length, options, fromBeginning, out int exception, out object ex_result);
                     if (exception != 0)
                         throw new Exception((string)ex_result);
-                }
-            }
-            }
-            int[] targetGrapehemeOffsets = StringInfo.ParseCombiningCharacters(target.ToString());
-            string[] targetGraphemes = new string[targetGrapehemeOffsets.Length];
-
-            int start = targetGrapehemeOffsets[0];
-            for (int i = 1; i < targetGrapehemeOffsets.Length; i++) {
-                int end = targetGrapehemeOffsets[i];
-                targetGraphemes[i-1] = target[start..end].ToString();
-                start = end;
-            }
-            targetGraphemes[^1] = target[start..target.Length].ToString(); // Add the last grapheme cluster
-
-            int srcIdx = 0;
-            while (srcIdx < source.Length) {
-                int nextGraphemeLength = StringInfo.GetNextTextElementLength(source.Slice(srcIdx));
-                ReadOnlySpan<char> srcGrapheme = source[srcIdx..(srcIdx + nextGraphemeLength)];
-                srcIdx += nextGraphemeLength;
-
-                int cmpRes = JsCompareString(srcGrapheme, targetGraphemes[0], options);
-                if (cmpRes != 0) {
-                    continue;
-                }
-
-                int j = 1;
-                int matchSrcIdx = srcIdx;
-                for (; j < targetGraphemes.Length; j++) {
-                    if (matchSrcIdx >= source.Length) {
-                        break;
-                    }
-                    int nextMatchGraphemeLength = StringInfo.GetNextTextElementLength(source.Slice(matchSrcIdx));
-                    srcGrapheme = source[matchSrcIdx..(matchSrcIdx + nextMatchGraphemeLength)];
-                    matchSrcIdx += nextMatchGraphemeLength;
-
-                    cmpRes = JsCompareString(srcGrapheme, targetGraphemes[j], options);
-                    if (cmpRes != 0) {
-                        break;
-                    }
-                }
-
-                if (j == targetGraphemes.Length) {
-                    idx = srcIdx - nextGraphemeLength;
-                    if (fromBeginning) {
-                        break;
-                    }
                 }
             }
 

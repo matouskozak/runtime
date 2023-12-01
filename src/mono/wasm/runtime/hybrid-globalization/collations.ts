@@ -6,7 +6,7 @@ import { monoStringToString, utf16ToString } from "../strings";
 import { MonoObject, MonoObjectRef, MonoString, MonoStringRef } from "../types/internal";
 import { Int32Ptr } from "../types/emscripten";
 import { wrap_error_root, wrap_no_error_root } from "../invoke-js";
-import { GraphemeBreaker } from "./segmenter";
+import { GraphemeSegmenter } from "./grapheme-segmenter";
 
 const COMPARISON_ERROR = -2;
 const INDEXING_ERROR = -1;
@@ -121,11 +121,12 @@ export function mono_wasm_index_of(culture: MonoStringRef, needlePtr: number, ne
         // locale e.g. "cs", options/casepicker None/0
 
         // TODO Grapheme segmentation
-        const graphemeBreaker = new GraphemeBreaker();
+        const graphemeBreaker = new GraphemeSegmenter();
         let result = -1;
         const needleSegments = [];
         let needleIdx = 0;
 
+        // Grapheme segmentation of needle string
         while (needleIdx < needle.length) {
             const breakIdx = graphemeBreaker.next_grapheme_break(needle, needleIdx);
             needleSegments.push(needle.slice(needleIdx, breakIdx));
@@ -379,57 +380,3 @@ function clean_string(str: string) {
     const nStr = str.normalize();
     return nStr.replace(/[\u200B-\u200D\uFEFF\0]/g, "");
 }
-
-// // TODO: rewrite using data from https://github.com/formatjs/formatjs/blob/58d6a7b398d776ca3d2726d72ae1573b65cc3bef/packages/intl-segmenter/src/cldr-segmentation-rules.generated.ts#L953-L1037
-// // TODO iterate over the rules and match previous/current
-
-// const CR = 1, LF = 2, Control = 3, Extend = 4, Regional_Indicator = 5, SpacingMark = 6, L = 7, V = 8, T = 9, LV = 10, LVT = 11;
-
-// // Returns whether a break is allowed between the
-// // two given grapheme breaking classes
-// function is_grapheme_break(previous: number, current: number) {
-//     // GB3. CR X LF
-//     if ((previous === CR) && (current === LF)) {
-//         return false;
-  
-//     // GB4. (Control|CR|LF) ÷
-//     } else if ([Control, CR, LF].includes(previous)) {
-//         return true;
-  
-//     // GB5. ÷ (Control|CR|LF)
-//     } else if ([Control, CR, LF].includes(current)) {
-//         return true;
-  
-//     // GB6. L X (L|V|LV|LVT)
-//     } else if ((previous === L) && [L, V, LV, LVT].includes(current)) {
-//         return false;
-  
-//     // GB7. (LV|V) X (V|T)
-//     } else if ([LV, V].includes(previous) && [V, T].includes(current)) {
-//         return false;
-  
-//     // GB8. (LVT|T) X (T)
-//     } else if ([LVT, T].includes(previous) && (current === T)) {
-//         return false;
-  
-//     // GB8a. Regional_Indicator X Regional_Indicator
-//     } else if ((previous === Regional_Indicator) && (current === Regional_Indicator)) {
-//         return false;
-  
-//     // GB9. X Extend
-//     } else if (current === Extend) {
-//         return false;
-  
-//     // GB9a. X SpacingMark
-//     } else if (current === SpacingMark) {
-//         return false;
-//     }
-  
-//     // GB9b. Prepend X (there are currently no characters with this class)
-//     //else if (previous === Prepend) {
-//     //  return false;
-//     //}
-  
-//     // GB10. Any ÷ Any
-//     return true;
-// }

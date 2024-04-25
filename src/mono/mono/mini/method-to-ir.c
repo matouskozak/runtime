@@ -9632,8 +9632,7 @@ calli_end:
 
 			if (klass == mono_defaults.void_class)
 				UNVERIFIED;
-			if (target_type_is_incompatible (cfg, m_class_get_byval_arg (klass), val))
-				UNVERIFIED;
+
 			/* frequent check in generic code: box (struct), brtrue */
 
 			/*
@@ -9992,6 +9991,8 @@ calli_end:
 				MONO_ADD_INS (cfg->cbb, ins);
 				*sp++ = ins;
 			} else {
+				if (target_type_is_incompatible (cfg, m_class_get_byval_arg (klass), val))
+					UNVERIFIED;
 				*sp++ = mini_emit_box (cfg, val, klass, context_used);
 			}
 			CHECK_CFG_EXCEPTION;

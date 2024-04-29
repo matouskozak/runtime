@@ -807,7 +807,8 @@ emit_native_wrapper_ilgen (MonoImage *image, MonoMethodBuilder *mb, MonoMethodSi
 	EmitMarshalContext m;
 	MonoMethodSignature *csig;
 	MonoClass *klass;
-	int i, argnum, *tmp_locals;
+	int i, argnum, *tmp_locals, **tmp_struct_locals;
+	SwiftPhysicalLowering *swift_lowering;
 	int type, param_shift = 0;
 	int func_addr_local = -1;
 	gboolean need_gc_safe = FALSE;
@@ -925,12 +926,52 @@ emit_native_wrapper_ilgen (MonoImage *image, MonoMethodBuilder *mb, MonoMethodSi
 	if (piinfo && (piinfo->piflags & PINVOKE_ATTRIBUTE_SUPPORTS_LAST_ERROR) && !m.runtime_marshalling_enabled)
 		mono_marshal_shared_mb_emit_exception_marshal_directive(mb, g_strdup("Setting SetLastError=true is not supported when runtime marshalling is disabled."));
 
+	// Collect information about the Swift struct lowering
+	if (mono_method_signature_has_ext_callconv (sig, MONO_EXT_CALLCONV_SWIFTCALL)) {
+		swift_lowering = g_newa (SwiftPhysicalLowering, sig->param_count);
+		tmp_struct_locals = g_newa (int*, sig->param_count);
+
+		for (i = 0; i < sig->param_count; i++) {
+			MonoType *ptype = sig->params [i];
+			tmp_struct_locals [i] = NULL;
+			
+			/*
+			 * Only struct that can be lowered need special handling.
+			 * Struct that are passed by reference are correctly handled by the codegen layers.
+			 */
+			if (mono_type_is_struct (ptype)) {
+				SwiftPhysicalLowering lowered_swift_struct = mono_marshal_get_swift_physical_lowering (ptype, FALSE);
+				if (!lowered_swift_struct.by_reference) {
+					swift_lowering [i] = lowered_swift_struct;
+					tmp_struct_locals [i] = g_newa (int, lowered_swift_struct.num_lowered_elements);
+				}
+			}
+		}
+    }
+
 	/* we first do all conversions */
 	tmp_locals = g_newa (int, sig->param_count);
 	m.orig_conv_args = g_newa (int, sig->param_count + 1);
 
+
+	// This is the place where necessary conversions are made
+	// The tmp_locals array is used to store the local variable for converted arguments
+	// We created tmp_struct_locals to store the local variables for the Swift struct elements
 	for (i = 0; i < sig->param_count; i ++) {
-		tmp_locals [i] = mono_emit_marshal (&m, i + param_shift, sig->params [i], mspecs [i + 1], 0, &csig->params [i], MARSHAL_ACTION_CONV_IN);
+		// If tmp_struct_type_locals is not NULL, it means that the argument is a Swift struct which is lowered
+		if (mono_method_signature_has_ext_callconv (sig, MONO_EXT_CALLCONV_SWIFTCALL) && tmp_struct_locals [i]) {
+			int struct_base_address = mono_mb_add_local (mb, int_type);
+			mono_mb_emit_ldarg_addr (mb, i + param_shift);
+			mono_mb_emit_stloc (mb, struct_base_address);
+			for (int j = 0; j < swift_lowering [i].num_lowered_elements; j++) {
+				mono_mb_emit_ldloc (mb, struct_base_address); // Load struct base address onto the stack		
+				mono_mb_emit_ldflda (mb, swift_lowering [i].offsets[j]); // Load field address (base address + offset) onto the stack  
+				tmp_struct_locals [i][j] = mono_mb_add_local (mb, int_type);
+				mono_mb_emit_stloc (mb, tmp_struct_locals [i][j]); // Store field address in local
+			}
+		} else {
+			tmp_locals [i] = mono_emit_marshal (&m, i + param_shift, sig->params [i], mspecs [i + 1], 0, &csig->params [i], MARSHAL_ACTION_CONV_IN);
+		}
 	}
 
 	// In coop mode need to register blocking state during native call
@@ -942,8 +983,16 @@ emit_native_wrapper_ilgen (MonoImage *image, MonoMethodBuilder *mb, MonoMethodSi
 	if (sig->hasthis)
 		mono_mb_emit_byte (mb, CEE_LDARG_0);
 
+	// This is the place where the arguments are pushed onto the stack
 	for (i = 0; i < sig->param_count; i++) {
-		mono_emit_marshal (&m, i + param_shift, sig->params [i], mspecs [i + 1], tmp_locals [i], NULL, MARSHAL_ACTION_PUSH);
+		if (mono_method_signature_has_ext_callconv (sig, MONO_EXT_CALLCONV_SWIFTCALL) && tmp_struct_locals [i]) {
+			for (int j = 0; j < swift_lowering [i].num_lowered_elements; j++) {
+				mono_mb_emit_ldloc (mb, tmp_struct_locals [i][j]);
+				mono_mb_emit_byte (mb, mono_type_to_ldind (swift_lowering [i].lowered_elements [j])); // Load the field value onto the stack
+			}
+		} else {
+			mono_emit_marshal (&m, i + param_shift, sig->params [i], mspecs [i + 1], tmp_locals [i], NULL, MARSHAL_ACTION_PUSH);
+		}
 	}
 
 	/* call the native method */
@@ -1059,6 +1108,10 @@ emit_native_wrapper_ilgen (MonoImage *image, MonoMethodBuilder *mb, MonoMethodSi
 
 	/* we need to convert byref arguments back and free string arrays */
 	for (i = 0; i < sig->param_count; i++) {
+		 // Skip CONV_OUT for lowered Swift structures
+        if (mono_method_signature_has_ext_callconv (sig, MONO_EXT_CALLCONV_SWIFTCALL) && tmp_struct_locals [i]) {
+            continue;
+        }
 		MonoType *t = sig->params [i];
 		MonoMarshalSpec *spec = mspecs [i + 1];
 

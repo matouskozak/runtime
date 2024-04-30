@@ -7511,10 +7511,11 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 			fsig = mini_get_signature (method, token, generic_context, cfg->error);
 
 			/*
+			 * We need to modify the signature of the callsite to account for the lowering of Swift structs.
 			 * FIXME: Refactor so that we don't duplicate Swift lowering calculations
 			 * in 'emit_native_wrapper_ilgen' and here.
 			 */
-			if (mono_method_signature_has_ext_callconv (fsig, MONO_EXT_CALLCONV_SWIFTCALL)) {				
+			if (mono_method_signature_has_ext_callconv (fsig, MONO_EXT_CALLCONV_SWIFTCALL) && fsig->pinvoke) {				
 				GArray *new_params = g_array_new (FALSE, FALSE, sizeof (MonoType *));
 				uint16_t new_param_count = 0;
 				// Iterate over arguments to detect structs and use lowering algorithm
@@ -7542,8 +7543,9 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 					new_sig->params [idx_param] = g_array_index (new_params, MonoType *, idx_param);
 				}
 				new_sig->ret = fsig->ret;
-				new_sig->pinvoke = fsig->pinvoke;			
-
+				new_sig->pinvoke = fsig->pinvoke;
+				new_sig->ext_callconv = fsig->ext_callconv;
+				
 				fsig = new_sig;
 			}
 			CHECK_CFG_ERROR;

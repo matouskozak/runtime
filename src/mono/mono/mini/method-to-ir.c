@@ -7509,6 +7509,44 @@ mono_method_to_ir (MonoCompile *cfg, MonoMethod *method, MonoBasicBlock *start_b
 			addr = *sp;
 			g_assert (addr);
 			fsig = mini_get_signature (method, token, generic_context, cfg->error);
+			/*
+			 * We need to modify the signature of the callsite to account for the lowering of Swift structs.
+			 * FIXME: Refactor so that we don't duplicate Swift lowering calculations
+			 * in 'emit_native_wrapper_ilgen' and here.
+			 */
+			if (fsig->pinvoke && mono_method_signature_has_ext_callconv (fsig, MONO_EXT_CALLCONV_SWIFTCALL)) {
+				GArray *new_params = g_array_new (FALSE, FALSE, sizeof (MonoType *));
+				uint16_t new_param_count = 0;
+				// Iterate over arguments to detect structs and use lowering algorithm
+				for (uint16_t idx_param = 0; idx_param < fsig->param_count; ++idx_param) {
+					MonoType *ptype = fsig->params [idx_param];
+					if (mono_type_is_struct (ptype)) {
+						SwiftPhysicalLowering lowered_swift_struct = mono_marshal_get_swift_physical_lowering (ptype, FALSE);
+						if (lowered_swift_struct.by_reference) {
+							g_array_append_val (new_params, ptype);
+							++new_param_count;
+						} else {
+							for (uint16_t idx_lowered = 0; idx_lowered < lowered_swift_struct.num_lowered_elements; ++idx_lowered) {
+								g_array_append_val (new_params, lowered_swift_struct.lowered_elements [idx_lowered]);
+								++new_param_count;
+							}
+						}
+					} else {
+						g_array_append_val (new_params, ptype);
+						++new_param_count;
+					}
+				}
+				// Create a new signature with the lowered arguments
+				MonoMethodSignature *new_sig = mono_metadata_signature_alloc (m_class_get_image (method->klass), new_param_count);
+				for (uint16_t idx_param = 0; idx_param < new_param_count; ++idx_param) {
+					new_sig->params [idx_param] = g_array_index (new_params, MonoType *, idx_param);
+				}
+				new_sig->ret = fsig->ret;
+				new_sig->pinvoke = fsig->pinvoke;
+				new_sig->ext_callconv = fsig->ext_callconv;
+				
+				fsig = new_sig;
+			}
 			CHECK_CFG_ERROR;
 
 			if (cfg->gsharedvt_min && mini_is_gsharedvt_variable_signature (fsig))

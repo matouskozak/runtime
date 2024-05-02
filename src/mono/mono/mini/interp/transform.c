@@ -3351,6 +3351,43 @@ interp_transform_call (TransformData *td, MonoMethod *method, MonoMethod *target
 				csignature = mono_inflate_generic_signature (csignature, generic_context, error);
 				return_val_if_nok (error, FALSE);
 			}
+			/*
+			 * We need to modify the signature of the callsite to account for the lowering of Swift structs.
+			 * This is done by creating a new signature with the lowered arguments.
+			 */
+			if (csignature->pinvoke && mono_method_signature_has_ext_callconv (csignature, MONO_EXT_CALLCONV_SWIFTCALL)) {
+				GArray *new_params = g_array_new (FALSE, FALSE, sizeof (MonoType *));
+				uint16_t new_param_count = 0;
+				// Iterate over arguments to detect structs and use lowering algorithm
+				for (uint16_t idx_param = 0; idx_param < csignature->param_count; ++idx_param) {
+					MonoType *ptype = csignature->params [idx_param];
+					if (mono_type_is_struct (ptype)) {
+						SwiftPhysicalLowering lowered_swift_struct = mono_marshal_get_swift_physical_lowering (ptype, FALSE);
+						if (lowered_swift_struct.by_reference) {
+							g_array_append_val (new_params, ptype);
+							++new_param_count;
+						} else {
+							for (uint16_t idx_lowered = 0; idx_lowered < lowered_swift_struct.num_lowered_elements; ++idx_lowered) {
+								g_array_append_val (new_params, lowered_swift_struct.lowered_elements [idx_lowered]);
+								++new_param_count;
+							}
+						}
+					} else {
+						g_array_append_val (new_params, ptype);
+						++new_param_count;
+					}
+				}
+				// Create a new signature with the lowered arguments
+				MonoMethodSignature *new_sig = mono_metadata_signature_alloc (m_class_get_image (method->klass), new_param_count);
+				for (uint16_t idx_param = 0; idx_param < new_param_count; ++idx_param) {
+					new_sig->params [idx_param] = g_array_index (new_params, MonoType *, idx_param);
+				}
+				new_sig->ret = csignature->ret;
+				new_sig->pinvoke = csignature->pinvoke;
+				new_sig->ext_callconv = csignature->ext_callconv;
+				
+				csignature = new_sig;
+			}
 
 			/*
 			 * The compiled interp entry wrapper is passed to runtime_invoke instead of

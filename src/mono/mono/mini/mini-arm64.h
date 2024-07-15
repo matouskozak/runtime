@@ -235,6 +235,10 @@ typedef enum {
 	 * ainfo->size is the size of the structure.
 	 */
 	ArgVtypeInIRegs,
+	/* Swift lowered struct */
+#ifdef MONO_ARCH_HAVE_SWIFTCALL
+	ArgSwiftVtypeLowered,
+#endif
 	/* SIMD arg in NEON register */
 	ArgInSIMDReg,
 	ArgVtypeByRef,
@@ -256,7 +260,13 @@ typedef struct {
 	int esize;
 	/* ArgHFA */
 	/* The offsets of the float values inside the arg */
-	guint16 foffsets [4];
+	guint16 foffsets [4]; // FIXME: rename to align with ArgSwiftVtypeLowered use
+	/* ArgSwiftVtypeInRegs */
+#ifdef MONO_ARCH_HAVE_SWIFTCALL
+	ArgStorage lowered_fields [4];
+#endif
+	int fr_start;
+	int gr_start;
 	/* ArgOnStack */
 	int slot_size;
 	/* hfa */

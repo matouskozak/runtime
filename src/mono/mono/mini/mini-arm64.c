@@ -1638,7 +1638,7 @@ is_hfa (MonoType *t, int *out_nfields, int *out_esize, int *field_offsets)
 }
 
 static void
-add_valuetype (CallInfo *cinfo, ArgInfo *ainfo, MonoType *t, gboolean is_return)
+add_valuetype (CallInfo *cinfo, ArgInfo *ainfo, MonoType *t, gboolean is_return, MonoMethodSignature *sig)
 {
 	int i, size, align_size, nregs, nfields, esize;
 	int field_offsets [16];
@@ -1656,6 +1656,82 @@ add_valuetype (CallInfo *cinfo, ArgInfo *ainfo, MonoType *t, gboolean is_return)
 		ainfo->nregs = 1;
 		ainfo->size = size;
 		cinfo->fr ++;
+		return;
+	}
+#endif
+
+#ifdef MONO_ARCH_HAVE_SWIFTCALL
+	if (sig && mono_method_signature_has_ext_callconv (sig, MONO_EXT_CALLCONV_SWIFTCALL)) {
+		SwiftPhysicalLowering lowered_swift_struct = mono_marshal_get_swift_physical_lowering (t, FALSE);
+		if (lowered_swift_struct.by_reference) {
+			g_assert_not_reached (); // NOT TESTED
+			ainfo->storage = ArgVtypeByRef;
+			ainfo->size = size;
+			return;
+		}
+
+		g_assert (lowered_swift_struct.num_lowered_elements > 0 && lowered_swift_struct.num_lowered_elements <= 4);
+
+		size = 0;
+		ainfo->storage = ArgSwiftVtypeLowered;
+		ainfo->nregs = lowered_swift_struct.num_lowered_elements;
+		ainfo->fr_start = cinfo->fr;
+		ainfo->gr_start = cinfo->gr;
+		cinfo->stack_usage = ALIGN_TO (cinfo->stack_usage, align);
+		ainfo->offset = cinfo->stack_usage;
+
+		//uint16_t num_fp_regs = 0;
+		//uint16_t num_int_regs = 0;
+
+		for (uint32_t idx_lowered_elem = 0; idx_lowered_elem < lowered_swift_struct.num_lowered_elements; ++idx_lowered_elem) {
+			MonoTypeEnum lowered_elem = lowered_swift_struct.lowered_elements [idx_lowered_elem];
+			if (lowered_elem == MONO_TYPE_R4) {
+				if (cinfo->fr == FP_PARAM_REGS)
+					g_assert_not_reached (); // NOT IMPLEMNTEED
+				else {
+					ainfo->lowered_fields [idx_lowered_elem] = ArgInFRegR4;
+					++cinfo->fr;
+				}
+				size += 4;
+			} else if (lowered_elem == MONO_TYPE_R8) {
+				if (cinfo->fr == FP_PARAM_REGS)
+					g_assert_not_reached (); // NOT IMPLEMNTEED
+				else {
+					ainfo->lowered_fields [idx_lowered_elem] = ArgInFReg;
+					++cinfo->fr;
+				}
+				size += 8;
+			} else {
+				if (cinfo->gr < PARAM_REGS) {
+					ainfo->lowered_fields [idx_lowered_elem] = ArgInIReg;
+					++cinfo->gr;
+				} else {
+					ainfo->lowered_fields [idx_lowered_elem] = ArgOnStack;
+					if (lowered_elem == MONO_TYPE_I8)
+						cinfo->stack_usage += 8;
+					else if (lowered_elem == MONO_TYPE_I4)
+						cinfo->stack_usage += 4;
+					else if (lowered_elem == MONO_TYPE_I2)
+						cinfo->stack_usage += 2;
+					else if (lowered_elem == MONO_TYPE_U1)
+						cinfo->stack_usage += 1;
+					else
+						g_assert_not_reached ();
+				}
+				if (lowered_elem == MONO_TYPE_I8)
+					size += 8;
+				else if (lowered_elem == MONO_TYPE_I4)
+					size += 4;
+				else if (lowered_elem == MONO_TYPE_I2)
+					size += 2;
+				else if (lowered_elem == MONO_TYPE_U1)
+					size += 1;
+				else
+					g_assert_not_reached ();
+			}
+			ainfo->foffsets [idx_lowered_elem] = GUINT32_TO_UINT8 (lowered_swift_struct.offsets [idx_lowered_elem]);
+			ainfo->size = size;
+		}
 		return;
 	}
 #endif
@@ -1768,7 +1844,7 @@ add_param (CallInfo *cinfo, ArgInfo *ainfo, MonoType *t, gboolean is_return)
 		break;
 	case MONO_TYPE_VALUETYPE:
 	case MONO_TYPE_TYPEDBYREF:
-		add_valuetype (cinfo, ainfo, ptype, is_return);
+		add_valuetype (cinfo, ainfo, ptype, is_return, NULL);
 		break;
 	case MONO_TYPE_VOID:
 		ainfo->storage = ArgNone;
@@ -1783,7 +1859,7 @@ add_param (CallInfo *cinfo, ArgInfo *ainfo, MonoType *t, gboolean is_return)
 			ainfo->storage = ArgVtypeByRef;
 			ainfo->gsharedvt = TRUE;
 		} else {
-			add_valuetype (cinfo, ainfo, ptype, is_return);
+			add_valuetype (cinfo, ainfo, ptype, is_return, NULL);
 		}
 		break;
 	case MONO_TYPE_VAR:
@@ -1835,6 +1911,7 @@ get_call_info (MonoMemPool *mp, MonoMethodSignature *sig)
 
 	/* Return value */
 	add_param (cinfo, &cinfo->ret, sig->ret, TRUE);
+	// TODO handle swift return struct
 	if (cinfo->ret.storage == ArgVtypeByRef)
 		cinfo->ret.reg = ARMREG_R8;
 	/* Reset state */
@@ -1864,9 +1941,12 @@ get_call_info (MonoMemPool *mp, MonoMethodSignature *sig)
 			MonoClass *swift_error = mono_class_try_get_swift_error_class ();
 			MonoClass *swift_error_ptr = mono_class_create_ptr (m_class_get_this_arg (swift_error));
 			MonoClass *klass = mono_class_from_mono_type_internal (sig->params [pindex]);
+			MonoType *ptype = NULL;
+			if (sig->pinvoke)
+				ptype = mini_get_underlying_type (sig->params [pindex]);
+
 			if (klass == swift_self && sig->pinvoke) {
 				guint32 align;
-				MonoType *ptype = mini_get_underlying_type (sig->params [pindex]);
 				int size = mini_type_stack_size_full (ptype, &align, cinfo->pinvoke);
 				g_assert (size == 8);
 
@@ -1883,6 +1963,26 @@ get_call_info (MonoMemPool *mp, MonoMethodSignature *sig)
 				ainfo->storage = ArgSwiftError;
 				continue;
 			}
+			
+			// Handle Swift frozen struct lowering
+		 	// if (sig->pinvoke && mono_type_is_struct (ptype)) {
+			// 	add_valuetype(cinfo, ainfo, ptype, FALSE, sig);
+
+			// 	if (ainfo->storage == ArgVtypeByRef) {
+			// 		g_assert_not_reached (); // NOT TESTED
+			// 		/* Pass the argument address in the next register */
+			// 		if (cinfo->gr >= PARAM_REGS) {
+			// 			ainfo->storage = ArgVtypeByRefOnStack;
+			// 			cinfo->stack_usage = ALIGN_TO (cinfo->stack_usage, 8);
+			// 			ainfo->offset = cinfo->stack_usage;
+			// 			cinfo->stack_usage += 8;
+			// 		} else {
+			// 			ainfo->reg = cinfo->gr;
+			// 			cinfo->gr ++;
+			// 		}
+			// 	}
+			// 	continue;
+			// }
 		}
 #endif
 
@@ -1937,7 +2037,7 @@ arg_get_storage (CallContext *ccontext, ArgInfo *ainfo)
 		case ArgInFReg:
 		case ArgInFRegR4:
 		case ArgHFA:
-                        return &ccontext->fregs [ainfo->reg];
+			return &ccontext->fregs [ainfo->reg];
 		case ArgOnStack:
 		case ArgOnStackR4:
 		case ArgOnStackR8:
@@ -1949,8 +2049,8 @@ arg_get_storage (CallContext *ccontext, ArgInfo *ainfo)
 			return (gpointer) ccontext->gregs [ainfo->reg];
 		case ArgSwiftError:
 			return &ccontext->gregs [PARAM_REGS + 2];
-                default:
-                        g_error ("Arg storage type not yet supported");
+		default:
+			g_error ("Arg storage type not yet supported");
         }
 }
 
@@ -2198,7 +2298,7 @@ dyn_call_supported (CallInfo *cinfo, MonoMethodSignature *sig)
 		break;
 	case ArgHFA:
 		break;
-	default:
+	default: // FIXME: swift struct lowering
 		return FALSE;
 	}
 
@@ -2216,7 +2316,7 @@ dyn_call_supported (CallInfo *cinfo, MonoMethodSignature *sig)
 		case ArgOnStack:
 		case ArgVtypeOnStack:
 			break;
-		default:
+		default: // FIXME: swift struct lowering
 			return FALSE;
 		}
 	}
@@ -2437,7 +2537,7 @@ mono_arch_start_dyn_call (MonoDynCallInfo *info, gpointer **args, guint8 *ret, g
 				for (i = 0; i < ainfo->size / 8; ++i)
 					p->regs [slot ++] = ((host_mgreg_t*)arg) [i];
 				break;
-			default:
+			default:// FIXME: swift struct lowering
 				g_assert_not_reached ();
 				break;
 			}
@@ -2526,7 +2626,7 @@ mono_arch_finish_dyn_call (MonoDynCallInfo *info, guint8 *buf)
 					((double*)ret) [cinfo->ret.foffsets [i] / 8] = args->fpregs [i];
 			}
 			break;
-		default:
+		default:// FIXME: swift struct lowering
 			g_assert_not_reached ();
 			break;
 		}
@@ -2781,6 +2881,8 @@ mono_arch_allocate_vars (MonoCompile *cfg)
 			mono_print_ins (cfg->vret_addr);
 		}
 		break;
+	case ArgSwiftVtypeLowered:
+		g_assert_not_reached (); 		// FIXME: swift struct lowering
 	default:
 		g_assert_not_reached ();
 		break;
@@ -2818,6 +2920,7 @@ mono_arch_allocate_vars (MonoCompile *cfg)
 		case ArgVtypeInIRegs:
 		case ArgHFA:
 		case ArgInSIMDReg:
+		case ArgSwiftVtypeLowered:
 			ins->opcode = OP_REGOFFSET;
 			ins->inst_basereg = cfg->frame_reg;
 			/* These arguments are saved to the stack in the prolog */
@@ -2995,7 +3098,7 @@ mono_arch_get_llvm_call_info (MonoCompile *cfg, MonoMethodSignature *sig)
 		linfo->ret.nslots = cinfo->ret.nregs;
 		linfo->ret.esize = cinfo->ret.esize;
 		break;
-	default:
+	default:// FIXME: swift struct lowering
 		g_assert_not_reached ();
 		break;
 	}
@@ -3059,7 +3162,7 @@ mono_arch_get_llvm_call_info (MonoCompile *cfg, MonoMethodSignature *sig)
 		case ArgInSIMDReg:
 			lainfo->storage = LLVMArgVtypeInSIMDReg;
 			break;
-		default:
+		default:// FIXME: swift struct lowering
 			g_assert_not_reached ();
 			break;
 		}
@@ -3173,6 +3276,9 @@ mono_arch_emit_call (MonoCompile *cfg, MonoCallInst *call)
 
 		mono_call_inst_add_outarg_reg (cfg, call, vtarg->dreg, cinfo->ret.reg, FALSE);
 		break;
+	case ArgSwiftVtypeLowered:
+		// FIXME: swift struct lowering support
+		g_assert_not_reached ();
 	default:
 		break;
 	}
@@ -3223,6 +3329,23 @@ mono_arch_emit_call (MonoCompile *cfg, MonoCallInst *call)
 		case ArgVtypeOnStack:
 		case ArgInSIMDReg:
 		case ArgHFA: {
+			MonoInst *ins;
+			guint32 align;
+			guint32 size;
+
+			size = mono_class_value_size (arg->klass, &align);
+
+			MONO_INST_NEW (cfg, ins, OP_OUTARG_VT);
+			ins->sreg1 = arg->dreg;
+			ins->klass = arg->klass;
+			ins->backend.size = size;
+			ins->inst_p0 = call;
+			ins->inst_p1 = mono_mempool_alloc (cfg->mempool, sizeof (ArgInfo));
+			memcpy (ins->inst_p1, ainfo, sizeof (ArgInfo));
+			MONO_ADD_INS (cfg->cbb, ins);
+			break;
+		}
+		case ArgSwiftVtypeLowered: {
 			MonoInst *ins;
 			guint32 align;
 			guint32 size;
@@ -3293,6 +3416,68 @@ mono_arch_emit_outarg_vt (MonoCompile *cfg, MonoInst *ins, MonoInst *src)
 			add_outarg_reg (cfg, call, ainfo->esize == 4 ? ArgInFRegR4 : ArgInFReg, ainfo->reg + i, load);
 		}
 		break;
+	case ArgSwiftVtypeLowered: {
+		g_assert (ainfo->nregs > 0 && ainfo->nregs <= 4);
+		uint16_t num_fp_regs = 0;
+		uint16_t num_int_regs = 0;
+		uint16_t offset = 0;
+		for (i = 0; i < ainfo->nregs; ++i) {
+			if (ainfo->lowered_fields [i] == ArgInFRegR4 || ainfo->lowered_fields [i] == ArgInFReg) {
+				if (ainfo->lowered_fields [i] == ArgInFRegR4)
+					MONO_INST_NEW (cfg, load, OP_LOADR4_MEMBASE);
+				else
+					MONO_INST_NEW (cfg, load, OP_LOADR8_MEMBASE);
+				load->dreg = mono_alloc_freg (cfg);
+				load->inst_basereg = src->dreg;
+				load->inst_offset = ainfo->foffsets [i];
+				MONO_ADD_INS (cfg->cbb, load);
+				add_outarg_reg (cfg, call, ainfo->lowered_fields [i], ainfo->fr_start + num_fp_regs, load);
+				++num_fp_regs;
+			} else if (ainfo->lowered_fields [i] == ArgInIReg) {
+				MONO_INST_NEW (cfg, load, OP_LOADI8_MEMBASE);
+				load->dreg = mono_alloc_ireg (cfg);
+				load->inst_basereg = src->dreg;
+				load->inst_offset = ainfo->foffsets [i];
+				MONO_ADD_INS (cfg->cbb, load);
+				add_outarg_reg (cfg, call, ainfo->lowered_fields [i], ainfo->gr_start + num_int_regs, load);
+				++num_int_regs;
+			} else if (ainfo->lowered_fields [i] == ArgOnStack) {
+				size_t size = 0;
+				if (i == ainfo->nregs - 1)
+					size = ainfo->size - ainfo->foffsets [i];
+				else
+					size = ainfo->foffsets [i + 1] - ainfo->foffsets [i];
+
+				int load_opcode, store_opcode;
+				if (size == 8 ) {
+					load_opcode = OP_LOADI8_MEMBASE;
+					store_opcode = OP_STOREI8_MEMBASE_REG;
+				} else if (size == 4) {
+					load_opcode = OP_LOADI4_MEMBASE;
+					store_opcode = OP_STOREI4_MEMBASE_REG;
+				} else if (size == 2) {
+					load_opcode = OP_LOADI2_MEMBASE;
+					store_opcode = OP_STOREI2_MEMBASE_REG;
+				} else if (size == 1) {
+					load_opcode = OP_LOADI1_MEMBASE;
+					store_opcode = OP_STOREI1_MEMBASE_REG;
+				} else {
+					g_assert_not_reached ();
+				}
+
+				MONO_INST_NEW (cfg, load, load_opcode);
+				load->dreg = mono_alloc_ireg (cfg);
+				load->inst_basereg = src->dreg;
+				load->inst_offset = ainfo->foffsets [i];
+				MONO_ADD_INS (cfg->cbb, load);
+				MONO_EMIT_NEW_STORE_MEMBASE (cfg, store_opcode, ARMREG_SP, ainfo->offset + offset, load->dreg);
+				offset += size;
+			} else {
+				g_assert_not_reached ();
+			}
+		}
+		break;
+	}
 	case ArgVtypeByRef:
 	case ArgVtypeByRefOnStack: {
 		MonoInst *vtaddr, *arg;
@@ -3791,7 +3976,7 @@ emit_move_return_value (MonoCompile *cfg, guint8 * code, MonoInst *ins)
 	}
 	case ArgVtypeByRef:
 		break;
-	default:
+	default:// FIXME: swift struct lowering
 		g_assert_not_reached ();
 		break;
 	}
@@ -5933,6 +6118,20 @@ emit_move_args (MonoCompile *cfg, guint8 *code)
 						code = emit_strfpx (code, ainfo->reg + part, ins->inst_basereg, GTMREG_TO_INT (ins->inst_offset + ainfo->foffsets [part]));
 				}
 				break;
+			case ArgSwiftVtypeLowered:
+				g_assert_not_reached ();
+				for (part = 0; part < ainfo->nregs; part ++) {
+					int offs = GTMREG_TO_INT (ins->inst_offset + ainfo->foffsets [part]);
+					if (ainfo->lowered_fields [part] == ArgInFRegR4)
+						code = emit_strfpw (code, ainfo->reg + part, ins->inst_basereg, offs);
+					else if (ainfo->lowered_fields [part] == ArgInFReg)
+						code = emit_strfpx (code, ainfo->reg + part, ins->inst_basereg, offs);
+					else if (ainfo->lowered_fields [part] == ArgInIReg)
+						code = emit_strx (code, ainfo->reg + part, ins->inst_basereg, offs);
+					else
+						g_assert_not_reached ();
+				}
+				break;
 			case ArgInSIMDReg:
 				code = emit_strfpq (code, ainfo->reg, ins->inst_basereg, GTMREG_TO_INT (ins->inst_offset));
 				break;
@@ -6340,8 +6539,10 @@ mono_arch_emit_epilog (MonoCompile *cfg)
 		}
 		break;
 	}
+	case ArgSwiftVtypeLowered:
+		g_assert_not_reached (); 		// FIXME: swift struct lowering
 	default:
-		break;
+		break; 
 	}
 
 	/* Destroy frame */

@@ -1869,6 +1869,19 @@ get_call_info (MonoMemPool *mp, MonoMethodSignature *sig)
 				cinfo->gr ++;
 			}
 		}
+
+		//if (mono_method_signature_has_ext_callconv (sig, MONO_EXT_CALLCONV_SWIFTCALL)) {
+			MonoClass *swift_error_ptr = mono_class_try_get_swift_error_ptr_class ();
+			MonoClass *swift_self = mono_class_try_get_swift_self_class ();
+			MonoClass *klass = mono_class_from_mono_type_internal (sig->params [pindex]);
+			if (klass) {
+				if (klass == swift_error_ptr) {
+					ainfo->storage = ArgSwiftError;
+				} else if (klass == swift_self) {
+					ainfo->storage = ArgSwiftSelf;
+				}
+			}
+		//}
 	}
 
 	/* Handle the case where there are no implicit arguments */
@@ -2978,6 +2991,18 @@ mono_arch_get_llvm_call_info (MonoCompile *cfg, MonoMethodSignature *sig)
 		case ArgInSIMDReg:
 			lainfo->storage = LLVMArgVtypeInSIMDReg;
 			break;
+		case ArgSwiftError: 
+			lainfo->storage = LLVMArgSwiftError;
+			//lainfo->storage = LLVMArgNormal;
+			break;
+		case ArgSwiftSelf: {
+			lainfo->storage = LLVMArgSwiftSelf;
+			// lainfo->storage = LLVMArgVtypeInReg;
+			// lainfo->nslots = ainfo->nregs;
+			// for (int j = 0; j < ainfo->nregs; ++j)
+			// 	lainfo->pair_storage [j] = LLVMArgInIReg;
+			break;
+		}
 		default:
 			g_assert_not_reached ();
 			break;

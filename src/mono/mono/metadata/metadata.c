@@ -2570,7 +2570,8 @@ metadata_signature_set_modopt_call_conv (MonoMethodSignature *sig, MonoType *cmo
 	if (count == 0)
 		return;
 	int base_callconv = sig->call_convention;
-	gboolean suppress_gc_transition = sig->suppress_gc_transition;
+	gboolean suppress_gc_transition = mono_method_signature_has_ext_callconv (sig, MONO_EXT_CALLCONV_SUPPRESS_GC_TRANSITION);
+	gboolean swift_callconv = mono_method_signature_has_ext_callconv (sig, MONO_EXT_CALLCONV_SWIFTCALL);
 	for (uint8_t i = 0; i < count; ++i) {
 		gboolean req = FALSE;
 		MonoType *cmod = mono_type_get_custom_modifier (cmod_type, i, &req, error);
@@ -2610,10 +2611,17 @@ metadata_signature_set_modopt_call_conv (MonoMethodSignature *sig, MonoType *cmo
 		if (!strcmp (name, "SuppressGCTransition")) {
 			suppress_gc_transition = TRUE;
 			continue;
+		} else if (!strcmp (name, "Swift")) {
+			swift_callconv = TRUE;
+			continue;
 		}
+
 	}
 	sig->call_convention = base_callconv;
-	sig->suppress_gc_transition = suppress_gc_transition;
+	if (suppress_gc_transition)
+		sig->ext_callconv |= MONO_EXT_CALLCONV_SUPPRESS_GC_TRANSITION;
+	if (swift_callconv)
+		sig->ext_callconv |= MONO_EXT_CALLCONV_SWIFTCALL;
 }
 
 /**

@@ -654,7 +654,11 @@ typedef enum {
 	 * type as the element.
 	 * esize is the size of the value.
 	 */
-	LLVMArgWasmVtypeAsScalar
+	LLVMArgWasmVtypeAsScalar,
+	/* SwiftError*/
+	LLVMArgSwiftError,
+	/* SwiftSelf */
+	LLVMArgSwiftSelf
 } LLVMArgStorage;
 
 typedef struct {
@@ -3009,5 +3013,11 @@ MonoMemoryManager* mini_get_default_mem_manager (void);
 
 MONO_COMPONENT_API int
 mono_wasm_get_debug_level (void);
+
+// TODO ask Zoltan if it's ok to move to mini.h rather than mini.c
+static GENERATE_TRY_GET_CLASS_WITH_CACHE (swift_error, "System.Runtime.InteropServices.Swift", "SwiftError")
+static GENERATE_TRY_GET_CLASS_PTR_WITH_CACHE (swift_error, "System.Runtime.InteropServices.Swift", "SwiftError")
+static GENERATE_TRY_GET_CLASS_WITH_CACHE (swift_self, "System.Runtime.InteropServices.Swift", "SwiftSelf")
+
 
 #endif /* __MONO_MINI_H__ */

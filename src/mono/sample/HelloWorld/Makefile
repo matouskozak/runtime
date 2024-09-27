@@ -25,6 +25,8 @@ publish:
 	'/p:MibcProfilePath="$(MIBC_PROFILE_PATH)"' \
 	/bl
 
+	swiftc -emit-library $(TOP)src/mono/sample/HelloWorld/SwiftUnmanagedCallersOnly.swift -o $(TOP)artifacts/bin/HelloWorld/$(MONO_ARCH)/$(MONO_CONFIG)/$(TARGET_OS)-$(MONO_ARCH)/publish/libSwiftUnmanagedCallersOnly.dylib
+
 run: publish
 	DOTNET_DebugWriteToStdErr=1 \
 	MONO_ENV_OPTIONS="$(MONO_ENV_OPTIONS)" \

@@ -813,6 +813,7 @@ type_to_llvm_type (EmitContext *ctx, MonoType *t)
 		LLVMTypeRef ltype;
 
 		klass = mono_class_from_mono_type_internal (t);
+		//MonoClass *swift_error = mono_class_try_get_swift_error_class ();
 
 		if (mini_class_is_simd (ctx->cfg, klass))
 			return simd_class_to_llvm_type (ctx, klass);
@@ -825,6 +826,8 @@ type_to_llvm_type (EmitContext *ctx, MonoType *t)
 			ltype = create_llvm_type_for_type (ctx->module, klass);
 			g_hash_table_insert (ctx->module->llvm_types, klass, ltype);
 		}
+		// if (klass == swift_error)
+		//  	return pointer_type (ltype);
 		return ltype;
 	}
 
@@ -1712,6 +1715,7 @@ sig_to_llvm_sig_full (EmitContext *ctx, MonoMethodSignature *sig, LLVMCallInfo *
 			pindex ++;
 			break;
 		case LLVMArgAsIArgs:
+		case LLVMArgSwiftSelf:
 			if (ainfo->esize == 8)
 				param_types [pindex] = LLVMArrayType (LLVMInt64Type (), ainfo->nslots);
 			else
@@ -3915,6 +3919,12 @@ emit_entry_bb (EmitContext *ctx, LLVMBuilderRef builder)
 		if ((var->opcode == OP_GSHAREDVT_LOCAL || var->opcode == OP_GSHAREDVT_ARG_REGOFFSET))
 			continue;
 
+		// MonoClass *swift_error_ptr = mono_class_try_get_swift_error_ptr_class ();
+		// MonoClass *swift_error = mono_class_try_get_swift_error_class ();
+		// MonoClass *klass = mono_class_from_mono_type_internal (var->inst_vtype);
+
+		//if (var->flags & (MONO_INST_VOLATILE|MONO_INST_INDIRECT) || (mini_type_is_vtype (var->inst_vtype) && !mini_class_is_simd (ctx->cfg, var->klass)) || klass == swift_error_ptr || klass == swift_error) {
+
 		if (var->flags & (MONO_INST_VOLATILE|MONO_INST_INDIRECT) || (mini_type_is_vtype (var->inst_vtype) && !mini_class_is_simd (ctx->cfg, var->klass))) {
 			if (!ctx_ok (ctx))
 				return;
@@ -3930,6 +3940,15 @@ emit_entry_bb (EmitContext *ctx, LLVMBuilderRef builder)
 					char *name = g_strdup_printf ("vreg_loc_%d", var->dreg);
 					etype = type_to_llvm_type (ctx, var->inst_vtype);
 					ctx->addresses [var->dreg] = create_address (ctx->module, build_named_alloca (ctx, var->inst_vtype, name), etype);
+					// TODO Set LLVM Attribute SwiftError/SwiftSelf - GENERATE_TRY_GET_CLASS_PTR_WITH_CACHE -> move to mini.c if used
+					// Zoltan: is_swift_error(var->inst_type)
+					// TODO Make a copy of alloca before call, set swift error and restore after call.  Where is the place to do that?!					
+					// if (klass) {
+					// 	if (klass == swift_error_ptr) {
+					// 		mono_llvm_set_swifterror_alloca (ctx->addresses [var->dreg]->value, TRUE);							
+					// 	}
+					// }
+
 					g_free (name);
 				}
 			}
@@ -3989,7 +4008,8 @@ emit_entry_bb (EmitContext *ctx, LLVMBuilderRef builder)
 			ctx->addresses [reg] = create_address (ctx->module, LLVMGetParam (ctx->lmethod, pindex), ctx->param_etypes [pindex]);
 			break;
 		}
-		case LLVMArgAsIArgs: {
+		case LLVMArgAsIArgs:
+		case LLVMArgSwiftSelf: {
 			LLVMValueRef arg = LLVMGetParam (ctx->lmethod, pindex);
 			int size;
 			MonoType *t = mini_get_underlying_type (ainfo->type);
@@ -4411,6 +4431,10 @@ process_call (EmitContext *ctx, MonoBasicBlock *bb, LLVMBuilderRef *builder_ref,
 	if (!call->rgctx_arg_reg && call->method && needs_extra_arg (ctx, call->method))
 		cinfo->dummy_arg = TRUE;
 
+	if (call->method) {
+		char* method_name = mono_method_get_full_name (call->method);
+		printf ("%s\n", method_name);
+	}
 	vretaddr = (cinfo->ret.storage == LLVMArgVtypeRetAddr || cinfo->ret.storage == LLVMArgVtypeByRef || cinfo->ret.storage == LLVMArgGsharedvtFixed || cinfo->ret.storage == LLVMArgGsharedvtVariable || cinfo->ret.storage == LLVMArgGsharedvtFixedVtype);
 
 	LLVMTypeRef *param_etypes;
@@ -4667,6 +4691,8 @@ process_call (EmitContext *ctx, MonoBasicBlock *bb, LLVMBuilderRef *builder_ref,
 			break;
 		}
 		case LLVMArgAsIArgs:
+		case LLVMArgSwiftSelf:
+		case LLVMArgSwiftError:
 			g_assert (addresses [reg]);
 			if (ainfo->esize == 8) {
 				LLVMTypeRef etype = LLVMArrayType (LLVMInt64Type (), ainfo->nslots);
@@ -4751,6 +4777,8 @@ process_call (EmitContext *ctx, MonoBasicBlock *bb, LLVMBuilderRef *builder_ref,
 	g_assert (!(call->rgctx_arg_reg && call->imt_arg_reg));
 	if (!sig->pinvoke && !cfg->llvm_only)
 		LLVMSetInstructionCallConv (lcall, LLVMMono1CallConv);
+	// if (sig->ext_callconv == MONO_EXT_CALLCONV_SWIFTCALL)
+	//  	LLVMSetInstructionCallConv (lcall, LLVMSwiftCallConv);
 
 	if (cinfo->ret.storage == LLVMArgVtypeByRef)
 		mono_llvm_add_instr_attr_with_type (lcall, 1 + cinfo->vret_arg_pindex, LLVM_ATTR_STRUCT_RET, type_to_llvm_type (ctx, sig->ret));
@@ -4771,6 +4799,18 @@ process_call (EmitContext *ctx, MonoBasicBlock *bb, LLVMBuilderRef *builder_ref,
 
 		if (is_byval)
 			mono_llvm_add_instr_byval_attr (lcall, 1 + ainfo->pindex, param_etypes [ainfo->pindex]);
+
+		//if (sig->ext_callconv == MONO_EXT_CALLCONV_SWIFTCALL) {
+			if (ainfo->storage == LLVMArgSwiftSelf) {
+				mono_llvm_add_instr_attr (lcall, 1 + ainfo->pindex, LLVM_ATTR_SWIFT_SELF);
+				//LLVMSetInstructionCallConv (lcall, LLVMSwiftCallConv);
+			}
+			if (ainfo->storage == LLVMArgSwiftError) {
+				mono_llvm_add_instr_attr (lcall, 1 + ainfo->pindex, LLVM_ATTR_SWIFT_ERROR);
+				//LLVMSetInstructionCallConv (lcall, LLVMSwiftCallConv);
+			}
+		//}
+
 	}
 
 	MonoClass *retclass = mono_class_from_mono_type_internal (sig->ret);
@@ -7827,7 +7867,7 @@ MONO_RESTORE_WARNING
 				} else {
 					if (values [ins->sreg1]) {
 						LLVMTypeRef src_t = LLVMTypeOf (values [ins->sreg1]);
-						LLVMValueRef dst = convert (ctx, addresses [ins->sreg1]->value, pointer_type (src_t));
+						LLVMValueRef dst = convert (ctx, addresses [ins->sreg1]->value, pointer_type (src_t)); // TODO Possibly here convert alloca to swifterror?
 						LLVMBuildStore (builder, values [ins->sreg1], dst);
 					}
 					addresses [ins->dreg] = addresses [ins->sreg1];
@@ -12594,7 +12634,9 @@ emit_method_inner (EmitContext *ctx)
 		LLVMAddTargetDependentFunctionAttr (method, "target-features", "+exception-handling");
 	}
 
-	if (!cfg->llvm_only)
+	// if (sig->ext_callconv == MONO_EXT_CALLCONV_SWIFTCALL)
+	//  	LLVMSetFunctionCallConv (method, LLVMSwiftCallConv);
+	else if (!cfg->llvm_only)
 		LLVMSetFunctionCallConv (method, LLVMMono1CallConv);
 
 	/* if the method doesn't contain
@@ -12669,10 +12711,10 @@ emit_method_inner (EmitContext *ctx)
 		return;
 	}
 
-	if (sig->pinvoke && cfg->method->wrapper_type != MONO_WRAPPER_RUNTIME_INVOKE && !cfg->llvm_only) {
-		set_failure (ctx, "pinvoke signature");
-		return;
-	}
+	// if (sig->pinvoke && cfg->method->wrapper_type != MONO_WRAPPER_RUNTIME_INVOKE && !cfg->llvm_only) {
+	// 	set_failure (ctx, "pinvoke signature");
+	// 	return;
+	// }
 
 #ifdef TARGET_WASM
 	if (ctx->module->interp && cfg->header->code_size > 100000 && !cfg->interp_entry_only) {
@@ -12781,6 +12823,11 @@ emit_method_inner (EmitContext *ctx)
 			g_assert (ctx->param_etypes [pindex]);
 			mono_llvm_add_param_byval_attr (LLVMGetParam (method, pindex), ctx->param_etypes [pindex]);
 		}
+
+		if (ainfo->storage == LLVMArgSwiftSelf)
+			mono_llvm_add_param_attr (LLVMGetParam (method, pindex), LLVM_ATTR_SWIFT_SELF);
+		if (ainfo->storage == LLVMArgSwiftError)
+			mono_llvm_add_param_attr (LLVMGetParam (method, pindex), LLVM_ATTR_SWIFT_ERROR);
 
 		if (ainfo->storage == LLVMArgVtypeByRef || ainfo->storage == LLVMArgVtypeAddr) {
 			/* For OP_LDADDR */
@@ -13187,6 +13234,7 @@ after_codegen:
 		if (cfg->verbose_level) {
 			char *name = mono_method_get_full_name (cfg->method);
 			printf ("%s emitted as %s\n", name, ctx->method_name);
+			mono_llvm_dump_value (ctx->lmethod);
 			g_free (name);
 		}
 
@@ -13320,6 +13368,8 @@ mono_llvm_emit_call (MonoCompile *cfg, MonoCallInst *call)
 		case LLVMArgGsharedvtFixed:
 		case LLVMArgGsharedvtFixedVtype:
 		case LLVMArgWasmVtypeAsScalar:
+		case LLVMArgSwiftSelf:
+		case LLVMArgSwiftError:
 			MONO_INST_NEW (cfg, ins, OP_LLVM_OUTARG_VT);
 			ins->dreg = mono_alloc_ireg (cfg);
 			ins->sreg1 = in->dreg;

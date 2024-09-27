@@ -470,6 +470,10 @@ convert_attr (AttrKind kind)
 		return Attribute::ByVal;
 	case LLVM_ATTR_UW_TABLE:
 		return Attribute::UWTable;
+	case LLVM_ATTR_SWIFT_ERROR:
+		return Attribute::SwiftError;
+	case LLVM_ATTR_SWIFT_SELF:
+		return Attribute::SwiftSelf;
 	default:
 		assert (0);
 		return Attribute::NoUnwind;
@@ -780,4 +784,11 @@ mono_llvm_get_ptr_type (void)
 {
 	PointerType *t = PointerType::get (*unwrap (LLVMGetGlobalContext ()), 0);
 	return wrap (t);
+}
+
+void
+mono_llvm_set_swifterror_alloca (LLVMValueRef alloca, gboolean is_swift_error)
+{
+	unwrap<AllocaInst> (alloca)->setSwiftError (is_swift_error);
+	assert (unwrap<AllocaInst> (alloca)->isSwiftError ());
 }

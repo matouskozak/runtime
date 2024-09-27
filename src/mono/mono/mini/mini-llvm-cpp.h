@@ -50,7 +50,9 @@ typedef enum {
 	LLVM_ATTR_STRUCT_RET,
 	LLVM_ATTR_NO_ALIAS,
 	LLVM_ATTR_BY_VAL,
-	LLVM_ATTR_UW_TABLE
+	LLVM_ATTR_UW_TABLE,
+	LLVM_ATTR_SWIFT_ERROR,
+	LLVM_ATTR_SWIFT_SELF
 } AttrKind;
 
 void
@@ -235,6 +237,9 @@ mono_llvm_inline_asm (LLVMBuilderRef builder, LLVMTypeRef type,
 
 LLVMTypeRef
 mono_llvm_get_ptr_type (void);
+
+void
+mono_llvm_set_swifterror_alloca (LLVMValueRef alloca, gboolean is_swift_error);
 
 G_END_DECLS
 

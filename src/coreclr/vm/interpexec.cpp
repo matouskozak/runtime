@@ -9,6 +9,7 @@
 #include "frames.h"
 #include "virtualcallstub.h"
 #include "comdelegate.h"
+#include "dbginterface.h"
 
 // for numeric_limits
 #include <limits>
@@ -367,13 +368,19 @@ void* GenericHandleCommon(MethodDesc * pMD, MethodTable * pMT, LPVOID signature)
     return GenericHandleWorkerCore(pMD, pMT, signature, 0xFFFFFFFF, NULL);
 }
 
-#ifdef DEBUG
-static void InterpBreakpoint()
+#if defined(DEBUG) || defined(DEBUGGING_SUPPORTED)
+static void InterpBreakpoint(const int32_t *ip, InterpMethodContextFrame *pFrame, int8_t *stack)
 {
+    printf("InterpBreakpoint: Hit at bytecode %p\n", ip);
+    fflush(stdout);
 
+    const ULONG_PTR info[3] = {(const ULONG_PTR)ip, (const ULONG_PTR)pFrame, (const ULONG_PTR)stack};
+    RaiseException(STATUS_BREAKPOINT, 0, 3, info);
+
+    printf("InterpBreakpoint: Resumed after breakpoint\n");
+    fflush(stdout);
 }
 #endif
-
 #define LOCAL_VAR_ADDR(offset,type) ((type*)(stack + (offset)))
 #define LOCAL_VAR(offset,type) (*LOCAL_VAR_ADDR(offset, type))
 #define NULL_CHECK(o) do { if ((o) == NULL) { COMPlusThrow(kNullReferenceException); } } while (0)
@@ -668,11 +675,56 @@ void* DoGenericLookup(void* genericVarAsPtr, InterpGenericLookup* pLookup)
 // Filter to ignore SEH exceptions representing C++ exceptions.
 LONG IgnoreCppExceptionFilter(PEXCEPTION_POINTERS pExceptionInfo, PVOID pv)
 {
-    return (pExceptionInfo->ExceptionRecord->ExceptionCode == EXCEPTION_MSVC)
-        ? EXCEPTION_CONTINUE_SEARCH
-        : EXCEPTION_EXECUTE_HANDLER;
-}
+    DWORD exceptionCode = pExceptionInfo->ExceptionRecord->ExceptionCode;
 
+    printf("IgnoreCppExceptionFilter: Exception code = 0x%X, STATUS_BREAKPOINT = 0x%X\n", exceptionCode, STATUS_BREAKPOINT);
+    fflush(stdout);
+
+    // Handle breakpoints and single steps by notifying the debugger
+    if (exceptionCode == STATUS_BREAKPOINT || exceptionCode == STATUS_SINGLE_STEP)
+    {
+        printf("IgnoreCppExceptionFilter: Handling debugger exception 0x%X\n", exceptionCode);
+        fflush(stdout);
+
+        Thread *pThread = GetThread();
+        if (pThread != NULL && g_pDebugInterface != NULL)
+        {
+            printf("IgnoreCppExceptionFilter: Notifying debugger via FirstChanceNativeException\n");
+            fflush(stdout);
+
+            // Notify the debugger of the exception
+            bool handled = g_pDebugInterface->FirstChanceNativeException(
+                pExceptionInfo->ExceptionRecord,
+                pExceptionInfo->ContextRecord,
+                exceptionCode,
+                pThread);
+
+            printf("IgnoreCppExceptionFilter: FirstChanceNativeException returned %d\n", handled);
+            fflush(stdout);
+
+            // Return EXCEPTION_EXECUTE_HANDLER so the PAL_EXCEPTION handler runs
+            // The handler will just return and execution will continue
+            return EXCEPTION_EXECUTE_HANDLER;
+        }
+        else
+        {
+            printf("IgnoreCppExceptionFilter: No thread or debugger interface, continuing search\n");
+            fflush(stdout);
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+    }
+
+    if (exceptionCode == EXCEPTION_MSVC)
+    {
+        printf("IgnoreCppExceptionFilter: Returning EXCEPTION_CONTINUE_SEARCH for C++ exception\n");
+        fflush(stdout);
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    printf("IgnoreCppExceptionFilter: Returning EXCEPTION_EXECUTE_HANDLER for code 0x%X\n", exceptionCode);
+    fflush(stdout);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
 // Wrapper around MethodDesc::DoPrestub to handle possible managed exceptions thrown by it.
 static void CallPreStub(MethodDesc *pMD)
 {
@@ -780,11 +832,39 @@ MAIN_LOOP:
 
             switch (*ip)
             {
-#ifdef DEBUG
+#if defined(DEBUG) || defined(DEBUGGING_SUPPORTED)
                 case INTOP_BREAKPOINT:
-                    InterpBreakpoint();
-                    ip++;
-                    break;
+                {
+                    printf("INTOP_BREAKPOINT case reached, calling InterpBreakpoint\n");
+                    fflush(stdout);
+
+                    // Need to handle the breakpoint exception in its own PAL_TRY block
+                    // because we're inside a C++ try block that would catch it first
+                    struct BreakpointParam
+                    {
+                        const int32_t *ip;
+                        InterpMethodContextFrame *pFrame;
+                        int8_t *stack;
+                    };
+                    BreakpointParam bpParam = { ip, pFrame, stack };
+
+                    PAL_TRY(BreakpointParam *, pBpParam, &bpParam)
+                    {
+                        InterpBreakpoint(pBpParam->ip, pBpParam->pFrame, pBpParam->stack);
+                    }
+                    PAL_EXCEPT_FILTER(IgnoreCppExceptionFilter)
+                    {
+                        // The filter should have handled the breakpoint
+                        // If we get here, something went wrong
+                        printf("INTOP_BREAKPOINT: Exception not handled by filter\n");
+                        fflush(stdout);
+                    }
+                    PAL_ENDTRY
+
+                    printf("INTOP_BREAKPOINT after InterpBreakpoint call\n");
+                    fflush(stdout);
+                    continue;
+                }
 #endif
                 case INTOP_INITLOCALS:
                     memset(LOCAL_VAR_ADDR(ip[1], void), 0, ip[2]);
@@ -2594,10 +2674,10 @@ MAIN_LOOP:
                             break;
                         }
                     }
-                    
+
                     OBJECTREF targetMethodObj = (*delegateObj)->GetTarget();
                     LOCAL_VAR(callArgsOffset, OBJECTREF) = targetMethodObj;
-                    
+
                     if ((targetMethod = NonVirtualEntry2MethodDesc(targetAddress)) != NULL)
                     {
                         // In this case targetMethod holds a pointer to the MethodDesc that will be called by using targetMethodObj as
@@ -3536,8 +3616,14 @@ do                                                                      \
                     COMPlusThrow(kPlatformNotSupportedException);
                     break;
                 default:
+                {
+                    int32_t opcodeValue = *ip;
+                    printf("Unimplemented or invalid interpreter opcode: 0x%x (%d)\n", opcodeValue, opcodeValue);
+                    printf("Method: %s\n", ((MethodDesc*)pMethod->methodHnd)->GetName());
+                    printf("IP offset: %d\n", (int)(ip - pFrame->startIp->GetByteCodes()));
                     assert(!"Unimplemented or invalid interpreter opcode");
                     break;
+                }
             }
         }
         UNINSTALL_UNWIND_AND_CONTINUE_HANDLER;

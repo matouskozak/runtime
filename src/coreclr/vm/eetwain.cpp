@@ -2255,7 +2255,7 @@ void InterpreterCodeManager::ResumeAfterCatch(CONTEXT *pContext, size_t targetSS
 
 #if defined(HOST_AMD64) && defined(HOST_WINDOWS)
     targetSSP = pInterpreterFrame->GetInterpExecMethodSSP();
-#endif    
+#endif
     ExecuteFunctionBelowContext((PCODE)ThrowResumeAfterCatchException, pContext, targetSSP, resumeSP, resumeIP);
 #endif // TARGET_WASM
 }
@@ -2429,7 +2429,7 @@ static void VirtualUnwindInterpreterCallFrame(TADDR sp, T_CONTEXT *pContext)
     else
     {
         // This indicates that there are no more interpreter frames to unwind in the current InterpExecMethod
-        // The stack walker will not find any code manager for the address InterpreterFrame::DummyCallerIP (0) 
+        // The stack walker will not find any code manager for the address InterpreterFrame::DummyCallerIP (0)
         // and move on to the next explicit frame which is the InterpreterFrame.
         // The SP is set to the address of the InterpreterFrame. For the case of interpreted exception handling
         // funclets, this matches the pExInfo->m_csfEHClause.SP that the CallFunclet sets.
@@ -2671,8 +2671,21 @@ GenericParamContextType InterpreterCodeManager::GetParamContextType(PREGDISPLAY 
 
 size_t InterpreterCodeManager::GetFunctionSize(GCInfoToken gcInfoToken)
 {
-    // Interpreter-TODO: Implement this
-    return 0;
+    CONTRACTL {
+        NOTHROW;
+        GC_NOTRIGGER;
+        SUPPORTS_DAC;
+    } CONTRACTL_END;
+
+    InterpreterGcInfoDecoder gcInfoDecoder(
+            gcInfoToken,
+            DECODE_CODE_LENGTH
+            );
+
+    UINT32 codeLength = gcInfoDecoder.GetCodeLength();
+    _ASSERTE( codeLength > 0 );
+    printf("Function size: %u\n", codeLength);
+    return codeLength;
 }
 
 #endif // FEATURE_INTERPRETER

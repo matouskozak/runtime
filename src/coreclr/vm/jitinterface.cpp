@@ -13067,7 +13067,8 @@ static TADDR UnsafeJitFunctionWorker(
     EECodeGenManager *pJitMgr,
     CEECodeGenInfo *pJitInfo,
     NativeCodeVersion nativeCodeVersion,
-    _Out_ ULONG* pSizeOfCode)
+    _Out_ ULONG* pSizeOfCode,
+    BOOL isInterpreterCode = FALSE)
 {
     STANDARD_VM_CONTRACT;
 
@@ -13172,8 +13173,9 @@ static TADDR UnsafeJitFunctionWorker(
 #if defined(DEBUGGING_SUPPORTED)
         //
         // Notify the debugger that we have successfully jitted the function
+        // For interpreter code, skip this - the caller will notify after setting up the precode
         //
-        if (g_pDebugInterface)
+        if (g_pDebugInterface && !isInterpreterCode)
         {
             g_pDebugInterface->JITComplete(nativeCodeVersion, (TADDR)nativeEntry);
 
@@ -13394,7 +13396,7 @@ PCODE UnsafeJitFunction(PrepareCodeConfig* config,
     if (interpreterMgr->IsInterpreterLoaded())
     {
         CInterpreterJitInfo interpreterJitInfo{ config, ftn, ILHeader, interpreterMgr };
-        ret = UnsafeJitFunctionWorker(interpreterMgr, &interpreterJitInfo, nativeCodeVersion, pSizeOfCode);
+        ret = UnsafeJitFunctionWorker(interpreterMgr, &interpreterJitInfo, nativeCodeVersion, pSizeOfCode, TRUE /* isInterpreterCode */);
 
         // If successful, record data.
         if (ret)

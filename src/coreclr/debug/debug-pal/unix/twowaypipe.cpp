@@ -170,6 +170,18 @@ bool TwoWayPipe::Disconnect()
         unlink(m_outPipeName);
     }
 
+    if (m_inboundPipe != INVALID_PIPE)
+    {
+        close(m_inboundPipe);
+        m_inboundPipe = INVALID_PIPE;
+    }
+
+    if (m_outboundPipe != INVALID_PIPE)
+    {
+        close(m_outboundPipe);
+        m_outboundPipe = INVALID_PIPE;
+    }
+
     m_state = NotInitialized;
     return true;
 }

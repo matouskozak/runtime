@@ -20,6 +20,7 @@
 
 #include "../../vm/methoditer.h"
 #include "../../vm/tailcallhelp.h"
+#include "../../interpreter/inc/intopsshared.h"
 
 const char *GetTType( TraceType tt);
 
@@ -1493,6 +1494,11 @@ bool DebuggerController::ApplyPatch(DebuggerControllerPatch *patch)
 
     if (patch->IsNativePatch())
     {
+        printf("DC::ApplyPatch IsNativePatch=true, fSaveOpcode=%d, dji=%p, address=%p\n",
+            patch->fSaveOpcode, patch->dji, patch->address);
+        LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch IsNativePatch=true, fSaveOpcode=%d, dji=%p\n",
+            patch->fSaveOpcode, patch->dji));
+
         if (patch->fSaveOpcode)
         {
             // We only used SaveOpcode for when we've moved code, so
@@ -1501,6 +1507,51 @@ bool DebuggerController::ApplyPatch(DebuggerControllerPatch *patch)
             _ASSERTE( AddressIsBreakpoint(patch->address) );
             return true;
         }
+
+#ifdef FEATURE_INTERPRETER
+        // Check if this address belongs to the interpreter
+        IJitManager* pJitManager = ExecutionManager::FindJitMan((PCODE)patch->address);
+        InterpreterJitManager* pInterpreterJitManager = ExecutionManager::GetInterpreterJitManager();
+
+        if (pJitManager != NULL && pInterpreterJitManager != NULL && pJitManager == (IJitManager*)pInterpreterJitManager)
+        {
+            printf("DC::ApplyPatch Address is in interpreter code, using INTOP_BREAKPOINT\n");
+            patch->kind = PATCH_KIND_NATIVE_INTERPRETER;
+            patch->opcode = CORDbgGetInstruction(patch->address);
+            *(uint32_t*)(patch->address) = INTOP_BREAKPOINT;
+            printf("DC::ApplyPatch Interpreter breakpoint (INTOP_BREAKPOINT) was inserted at %p for opcode %x\n",
+                patch->address, patch->opcode);
+            return true;
+        }
+#endif // FEATURE_INTERPRETER
+
+        if (patch->dji != NULL)
+        {
+            NativeCodeVersion::OptimizationTier tier = patch->dji->m_nativeCodeVersion.GetOptimizationTier();
+
+            printf("DC::ApplyPatch tier=%d, OptimizationTierInterpreted=%d\n",
+                (int)tier, (int)NativeCodeVersion::OptimizationTierInterpreted);
+            LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch tier=%d, OptimizationTierInterpreted=%d\n",
+                (int)tier, (int)NativeCodeVersion::OptimizationTierInterpreted));
+
+            if (tier == NativeCodeVersion::OptimizationTierInterpreted)
+            {
+                patch->kind = PATCH_KIND_NATIVE_INTERPRETER;
+                patch->opcode = CORDbgGetInstruction(patch->address);
+                *(uint32_t*)(patch->address) = INTOP_BREAKPOINT;
+                printf("DC::ApplyPatch Interpreter breakpoint (INTOP_BREAKPOINT) was inserted at %p for opcode %x\n",
+                    patch->address, patch->opcode);
+                LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch Interpreter breakpoint (INTOP_BREAKPOINT) was inserted at %p for opcode %x\n",
+                    patch->address, patch->opcode));
+                return true;
+            }
+        }
+        else
+        {
+            printf("DC::ApplyPatch patch->dji is NULL, cannot check tier\n");
+            LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch patch->dji is NULL, cannot check tier\n"));
+        }
+
 
 #if _DEBUG
         VerifyExecutableAddress((BYTE*)patch->address);
@@ -2687,6 +2738,14 @@ DebuggerPatchSkip *DebuggerController::ActivatePatchSkip(Thread *thread,
     DebuggerControllerPatch *patch = g_patches->GetPatch((CORDB_ADDRESS_TYPE *)PC);
     DebuggerPatchSkip *skip = NULL;
 
+    printf("DC::APS: PC=0x%p, patch=%p\n", PC, patch);
+    if (patch != NULL)
+    {
+        printf("DC::APS: patch->kind=%d, PATCH_KIND_NATIVE_INTERPRETER=%d, patch->address=0x%p\n",
+            patch->kind, PATCH_KIND_NATIVE_INTERPRETER, patch->address);
+    }
+    fflush(stdout);
+
     if (patch != NULL && patch->IsNativePatch())
     {
         //
@@ -2708,6 +2767,17 @@ DebuggerPatchSkip *DebuggerController::ActivatePatchSkip(Thread *thread,
             pDebuggerSteppingInfo->EnableInPlaceSingleStepOverCall(patch->opcode);
         }
 #endif
+    }
+
+    else if (patch != NULL && patch->kind == PATCH_KIND_NATIVE_INTERPRETER)
+    {
+        printf("DC::APS: Restoring original opcode 0x%x at interpreter address 0x%p\n",
+            patch->opcode, patch->address);
+        fflush(stdout);
+        // Restore original opcode
+        *(uint32_t*)(patch->address) = (uint32_t)patch->opcode;
+        printf("DC::APS: Opcode restored, now reads as 0x%x\n", *(uint32_t*)(patch->address));
+        fflush(stdout);
     }
 
     return skip;
@@ -3217,7 +3287,8 @@ Exit:
     }
 #endif
 
-    ActivatePatchSkip(thread, dac_cast<PTR_CBYTE>(GetIP(pCtx)), FALSE
+    // originalAddress contains the bytecode IP where the patch is located
+    ActivatePatchSkip(thread, dac_cast<PTR_CBYTE>((CORDB_ADDRESS_TYPE*)originalAddress), FALSE
 #ifdef OUT_OF_PROCESS_SETTHREADCONTEXT
     , pDebuggerSteppingInfo
 #endif
@@ -4565,6 +4636,31 @@ bool DebuggerController::DispatchNativeException(EXCEPTION_RECORD *pException,
         switch (dwCode)
         {
         case EXCEPTION_BREAKPOINT:
+            printf("DC::DNE EXCEPTION_BREAKPOINT received, NumberParameters=%d\n", pException->NumberParameters);
+            fflush(stdout);
+            // Check if this is an interpreter breakpoint by examining if we have the special exception information
+            // Interpreter breakpoints provide: [0] = bytecode IP, [1] = pFrame, [2] = stack
+            if (pException->NumberParameters >= 3 && pException->ExceptionInformation[1] != 0)
+            {
+                // This is an interpreter breakpoint with bytecode information
+                printf("DC::DNE Interpreter Breakpoint detected with bytecode info\n");
+                fflush(stdout);
+                LOG(
+                    (LF_CORDB,
+                        LL_INFO1000,
+                        "DC::DNE Interpreter Breakpoint hit, bytecode ip = %p, pFrame = %p, stack = %p\n",
+                         (void*)pException->ExceptionInformation[0],
+                          (void*)pException->ExceptionInformation[1]
+                          , (void*)pException->ExceptionInformation[2]));
+
+                // Store the bytecode IP for patch lookup
+                ip = (CORDB_ADDRESS_TYPE*)pException->ExceptionInformation[0];
+            }
+            else
+            {
+                printf("DC::DNE Regular breakpoint (not interpreter)\n");
+                fflush(stdout);
+            }
             // EIP should be properly set up at this point.
             result = DebuggerController::DispatchPatchOrSingleStep(pCurThread,
                                                        pContext,

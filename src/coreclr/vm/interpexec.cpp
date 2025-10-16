@@ -813,6 +813,9 @@ void InterpExecMethod(InterpreterFrame *pInterpreterFrame, InterpMethodContextFr
     bool isTailcall = false;
     MethodDesc* targetMethod;
 
+    // Track if we just processed a breakpoint and need to skip pFrame->ip update
+    bool skipFrameIpUpdate = false;
+
     // Save the lowest SP in the current method so that we can identify it by that during stackwalk
     pInterpreterFrame->SetInterpExecMethodSP((TADDR)GetCurrentSP());
 
@@ -828,14 +831,36 @@ MAIN_LOOP:
             // and we can save the IP to the frame at the suspension time.
             // It will be useful for testing e.g. the debug info at various locations in the current method, so let's
             // keep it for such purposes until we don't need it anymore.
-            pFrame->ip = (int32_t*)ip;
+
+            // Skip the IP update if we just returned from a breakpoint to avoid showing
+            // the wrong source line (we need to execute the restored instruction first)
+            // When we hit a breakpoint, adjust IP backward by one instruction to compensate
+            // for the debugger placing the breakpoint at the wrong IL offset.
+            bool isBreakpoint = (*ip == INTOP_BREAKPOINT);
+            if (!skipFrameIpUpdate)
+            {
+                if (isBreakpoint)
+                {
+                    // Breakpoint was placed one instruction too late, adjust backward
+                    // Typical instruction size is 3 words (12 bytes): opcode + 2 operands
+                    pFrame->ip = (int32_t*)(ip - 3);
+                }
+                else
+                {
+                    // Normal case: update to current IP
+                    pFrame->ip = (int32_t*)ip;
+                }
+            }
+            skipFrameIpUpdate = false;
 
             switch (*ip)
             {
 #if defined(DEBUG) || defined(DEBUGGING_SUPPORTED)
                 case INTOP_BREAKPOINT:
                 {
-                    printf("INTOP_BREAKPOINT case reached, calling InterpBreakpoint\n");
+                    printf("\n*** BREAKPOINT HIT at ip=%p, pFrame->ip=%p ***\n", ip, pFrame->ip);
+                    printf("*** Opcodes around breakpoint: [ip-12]=0x%x [ip-8]=0x%x [ip-4]=0x%x [ip]=0x%x ***\n",
+                        *(ip-3), *(ip-2), *(ip-1), *ip);
                     fflush(stdout);
 
                     // Need to handle the breakpoint exception in its own PAL_TRY block
@@ -855,14 +880,19 @@ MAIN_LOOP:
                     PAL_EXCEPT_FILTER(IgnoreCppExceptionFilter)
                     {
                         // The filter should have handled the breakpoint
-                        // If we get here, something went wrong
-                        printf("INTOP_BREAKPOINT: Exception not handled by filter\n");
-                        fflush(stdout);
                     }
                     PAL_ENDTRY
 
-                    printf("INTOP_BREAKPOINT after InterpBreakpoint call\n");
+                    printf("*** BREAKPOINT RETURNED, opcode now 0x%x, setting skipFrameIpUpdate=true ***\n", *ip);
                     fflush(stdout);
+
+                    // After the debugger processes the breakpoint, the bytecode has been
+                    // restored to the original opcode by UnapplyPatch. We need to re-execute
+                    // the current instruction (not advance past it), so we use 'continue'
+                    // to loop back and execute whatever opcode is now at this location.
+                    // Set the flag to skip pFrame->ip update on the next iteration, so the
+                    // debugger sees the current IP, not the advanced one.
+                    skipFrameIpUpdate = true;
                     continue;
                 }
 #endif

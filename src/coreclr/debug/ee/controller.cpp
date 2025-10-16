@@ -2832,16 +2832,6 @@ DebuggerPatchSkip *DebuggerController::ActivatePatchSkip(Thread *thread,
 #endif
     }
 
-    else if (patch != NULL && patch->kind == PATCH_KIND_NATIVE_INTERPRETER)
-    {
-        printf("DC::APS: Restoring original opcode 0x%x at interpreter address 0x%p\n",
-            patch->opcode, patch->address);
-        fflush(stdout);
-        // Restore original opcode
-        *(uint32_t*)(patch->address) = (uint32_t)patch->opcode;
-        printf("DC::APS: Opcode restored, now reads as 0x%x\n", *(uint32_t*)(patch->address));
-        fflush(stdout);
-    }
 
     return skip;
 }

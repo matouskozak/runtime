@@ -5942,6 +5942,9 @@ void Debugger::SendBreakpoint(Thread *thread, CONTEXT *context,
 
     LOG((LF_CORDB, LL_INFO10000, "D::SB: breakpoint BP:0x%x\n", breakpoint));
 
+    printf("D::SendBreakpoint called for breakpoint %p\n", breakpoint);
+    fflush(stdout);
+
     _ASSERTE((g_pEEInterface->GetThread() &&
              !g_pEEInterface->GetThread()->m_fPreemptiveGCDisabled));
 
@@ -5955,7 +5958,11 @@ void Debugger::SendBreakpoint(Thread *thread, CONTEXT *context,
     ipce->BreakpointData.breakpointToken.Set(breakpoint);
     _ASSERTE( breakpoint->m_pAppDomain == ipce->vmAppDomain.GetRawPtr());
 
+    printf("D::SendBreakpoint sending DB_IPCE_BREAKPOINT IPC event\n");
+    fflush(stdout);
     m_pRCThread->SendIPCEvent();
+    printf("D::SendBreakpoint sent DB_IPCE_BREAKPOINT IPC event\n");
+    fflush(stdout);
 }
 
 

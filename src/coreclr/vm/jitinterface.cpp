@@ -13395,8 +13395,17 @@ PCODE UnsafeJitFunction(PrepareCodeConfig* config,
     // If the interpreter was loaded, use it.
     if (interpreterMgr->IsInterpreterLoaded())
     {
+        // Create a NativeCodeVersion for the interpreter before compilation
+        // This allows the debugger to discover the method via GetNativeCodeVersion
+        NativeCodeVersion interpretedVersion;
+        {
+            CodeVersionManager::LockHolder codeVersioningLockHolder;
+            ILCodeVersion ilCodeVersion = config->GetCodeVersion().GetILCodeVersion();
+            ilCodeVersion.AddNativeCodeVersion(ftn, NativeCodeVersion::OptimizationTierInterpreted, &interpretedVersion);
+        }
+
         CInterpreterJitInfo interpreterJitInfo{ config, ftn, ILHeader, interpreterMgr };
-        ret = UnsafeJitFunctionWorker(interpreterMgr, &interpreterJitInfo, nativeCodeVersion, pSizeOfCode, TRUE /* isInterpreterCode */);
+        ret = UnsafeJitFunctionWorker(interpreterMgr, &interpreterJitInfo, interpretedVersion, pSizeOfCode, TRUE /* isInterpreterCode */);
 
         // If successful, record data.
         if (ret)
@@ -13439,6 +13448,17 @@ PCODE UnsafeJitFunction(PrepareCodeConfig* config,
 
             *isInterpreterCode = true;
             *isTier0 = interpreterJitInfo.getJitFlagsInternal()->IsSet(CORJIT_FLAGS::CORJIT_FLAG_TIER0);
+
+            // Associate the bytecode address with the NativeCodeVersion
+            // This allows the debugger to find the version via GetNativeCodeVersion(pMethod, bytecodeAddr)
+            interpretedVersion.SetNativeCodeInterlocked(ret);
+
+            // Notify the debugger that the method is now available for debugging in the interpreter
+            // This allows breakpoints to be bound to the interpreter bytecode
+            if (g_pDebugInterface)
+            {
+                g_pDebugInterface->JITComplete(interpretedVersion, ret);
+            }
         }
     }
 #endif // FEATURE_INTERPRETER

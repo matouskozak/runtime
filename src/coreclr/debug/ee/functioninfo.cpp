@@ -896,6 +896,14 @@ void DebuggerJitInfo::LazyInitBounds()
     if (m_fAttemptInit)
         return;
 
+    // For interpreter code, skip bounds initialization - there's no native debug info
+    if (this->m_nativeCodeVersion.GetOptimizationTier() == NativeCodeVersion::OptimizationTierInterpreted)
+    {
+        Debugger::DebuggerDataLockHolder debuggerDataLockHolder(g_pDebugger);
+        m_fAttemptInit = true;
+        return;
+    }
+
     EX_TRY
     {
         LOG((LF_CORDB, LL_EVERYTHING, "DJI::LazyInitBounds: this=0x%p Initing\n", this));
@@ -1250,14 +1258,36 @@ void DebuggerJitInfo::Init(TADDR newAddress)
     this->m_addrOfCode = (ULONG_PTR)PTR_TO_CORDB_ADDRESS((BYTE*) newAddress);
     this->m_jitComplete = true;
 
-    this->m_codeRegionInfo.InitializeFromStartAddress(PINSTRToPCODE((TADDR)this->m_addrOfCode));
-    this->m_sizeOfCode =  this->m_codeRegionInfo.getSizeOfTotalCode();
-
-    this->m_encVersion = this->m_methodInfo->GetCurrentEnCVersion();
+    // For interpreter code, we need to handle code region info differently
+    // since there are no native hot/cold code regions or funclets
+    if (this->m_nativeCodeVersion.GetOptimizationTier() != NativeCodeVersion::OptimizationTierInterpreted)
+    {
+        this->m_codeRegionInfo.InitializeFromStartAddress(PINSTRToPCODE((TADDR)this->m_addrOfCode));
+        this->m_sizeOfCode =  this->m_codeRegionInfo.getSizeOfTotalCode();
 
 #if defined(FEATURE_EH_FUNCLETS)
-    this->InitFuncletAddress();
+        this->InitFuncletAddress();
 #endif // FEATURE_EH_FUNCLETS
+    }
+    else
+    {
+        // For interpreter code, initialize code region info with IL bytecode info
+        // We only have "hot" code (the bytecode), no cold regions or funclets
+        MethodDesc* pMD = this->m_nativeCodeVersion.GetMethodDesc();
+        COR_ILMETHOD* pILHeader = pMD->GetILHeader();
+        SIZE_T ilCodeSize = 0;
+
+        if (pILHeader != NULL)
+        {
+            COR_ILMETHOD_DECODER decoder(pILHeader);
+            ilCodeSize = decoder.GetCodeSize();
+        }
+
+        this->m_codeRegionInfo.InitializeForInterpreter(PINSTRToPCODE((TADDR)this->m_addrOfCode), ilCodeSize);
+        this->m_sizeOfCode = this->m_codeRegionInfo.getSizeOfTotalCode();
+    }
+
+    this->m_encVersion = this->m_methodInfo->GetCurrentEnCVersion();
 
     LOG((LF_CORDB,LL_INFO10000,"De::JITCo:Got DJI %p (encVersion: %zx),"
          "Hot section from %p to %p "

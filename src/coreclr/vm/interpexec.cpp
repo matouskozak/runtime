@@ -34,9 +34,55 @@ extern "C" PCODE CID_VirtualOpenDelegateDispatch(TransitionBlock * pTransitionBl
 // Filter to ignore SEH exceptions representing C++ exceptions.
 LONG IgnoreCppExceptionFilter(PEXCEPTION_POINTERS pExceptionInfo, PVOID pv)
 {
-    return (pExceptionInfo->ExceptionRecord->ExceptionCode == EXCEPTION_MSVC)
-        ? EXCEPTION_CONTINUE_SEARCH
-        : EXCEPTION_EXECUTE_HANDLER;
+    DWORD exceptionCode = pExceptionInfo->ExceptionRecord->ExceptionCode;
+
+    printf("IgnoreCppExceptionFilter: Exception code = 0x%X, STATUS_BREAKPOINT = 0x%X\n", exceptionCode, STATUS_BREAKPOINT);
+    fflush(stdout);
+
+    // Handle breakpoints and single steps by notifying the debugger
+    if (exceptionCode == STATUS_BREAKPOINT || exceptionCode == STATUS_SINGLE_STEP)
+    {
+        printf("IgnoreCppExceptionFilter: Handling debugger exception 0x%X\n", exceptionCode);
+        fflush(stdout);
+
+        Thread *pThread = GetThread();
+        if (pThread != NULL && g_pDebugInterface != NULL)
+        {
+            printf("IgnoreCppExceptionFilter: Notifying debugger via FirstChanceNativeException\n");
+            fflush(stdout);
+
+            // Notify the debugger of the exception
+            bool handled = g_pDebugInterface->FirstChanceNativeException(
+                pExceptionInfo->ExceptionRecord,
+                pExceptionInfo->ContextRecord,
+                exceptionCode,
+                pThread);
+
+            printf("IgnoreCppExceptionFilter: FirstChanceNativeException returned %d\n", handled);
+            fflush(stdout);
+
+            // Return EXCEPTION_EXECUTE_HANDLER so the PAL_EXCEPTION handler runs
+            // The handler will just return and execution will continue
+            return EXCEPTION_EXECUTE_HANDLER;
+        }
+        else
+        {
+            printf("IgnoreCppExceptionFilter: No thread or debugger interface, continuing search\n");
+            fflush(stdout);
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+    }
+
+    if (exceptionCode == EXCEPTION_MSVC)
+    {
+        printf("IgnoreCppExceptionFilter: Returning EXCEPTION_CONTINUE_SEARCH for C++ exception\n");
+        fflush(stdout);
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    printf("IgnoreCppExceptionFilter: Returning EXCEPTION_EXECUTE_HANDLER for code 0x%X\n", exceptionCode);
+    fflush(stdout);
+    return EXCEPTION_EXECUTE_HANDLER;
 }
 
 template<typename Function>
@@ -737,97 +783,6 @@ void* DoGenericLookup(void* genericVarAsPtr, InterpGenericLookup* pLookup)
     return result;
 }
 
-// Filter to ignore SEH exceptions representing C++ exceptions.
-LONG IgnoreCppExceptionFilter(PEXCEPTION_POINTERS pExceptionInfo, PVOID pv)
-{
-    DWORD exceptionCode = pExceptionInfo->ExceptionRecord->ExceptionCode;
-
-    printf("IgnoreCppExceptionFilter: Exception code = 0x%X, STATUS_BREAKPOINT = 0x%X\n", exceptionCode, STATUS_BREAKPOINT);
-    fflush(stdout);
-
-    // Handle breakpoints and single steps by notifying the debugger
-    if (exceptionCode == STATUS_BREAKPOINT || exceptionCode == STATUS_SINGLE_STEP)
-    {
-        printf("IgnoreCppExceptionFilter: Handling debugger exception 0x%X\n", exceptionCode);
-        fflush(stdout);
-
-        Thread *pThread = GetThread();
-        if (pThread != NULL && g_pDebugInterface != NULL)
-        {
-            printf("IgnoreCppExceptionFilter: Notifying debugger via FirstChanceNativeException\n");
-            fflush(stdout);
-
-            // Notify the debugger of the exception
-            bool handled = g_pDebugInterface->FirstChanceNativeException(
-                pExceptionInfo->ExceptionRecord,
-                pExceptionInfo->ContextRecord,
-                exceptionCode,
-                pThread);
-
-            printf("IgnoreCppExceptionFilter: FirstChanceNativeException returned %d\n", handled);
-            fflush(stdout);
-
-            // Return EXCEPTION_EXECUTE_HANDLER so the PAL_EXCEPTION handler runs
-            // The handler will just return and execution will continue
-            return EXCEPTION_EXECUTE_HANDLER;
-        }
-        else
-        {
-            printf("IgnoreCppExceptionFilter: No thread or debugger interface, continuing search\n");
-            fflush(stdout);
-            return EXCEPTION_CONTINUE_SEARCH;
-        }
-    }
-
-    if (exceptionCode == EXCEPTION_MSVC)
-    {
-        printf("IgnoreCppExceptionFilter: Returning EXCEPTION_CONTINUE_SEARCH for C++ exception\n");
-        fflush(stdout);
-        return EXCEPTION_CONTINUE_SEARCH;
-    }
-
-    printf("IgnoreCppExceptionFilter: Returning EXCEPTION_EXECUTE_HANDLER for code 0x%X\n", exceptionCode);
-    fflush(stdout);
-    return EXCEPTION_EXECUTE_HANDLER;
-}
-// Wrapper around MethodDesc::DoPrestub to handle possible managed exceptions thrown by it.
-static void CallPreStub(MethodDesc *pMD)
-{
-    STATIC_STANDARD_VM_CONTRACT;
-    _ASSERTE(pMD != NULL);
-
-    if (!pMD->IsPointingToPrestub() &&
-        pMD->GetTemporaryEntryPoint() && // The prestub may not yet be ready to be used, so force temporary entry point creation, and check again.
-        !pMD->IsPointingToPrestub())
-        return;
-
-    struct Param
-    {
-        MethodDesc *pMethodDesc;
-    }
-    param = { pMD };
-
-    PAL_TRY(Param *, pParam, &param)
-    {
-        (void)pParam->pMethodDesc->DoPrestub(NULL /* MethodTable */, CallerGCMode::Coop);
-    }
-    PAL_EXCEPT_FILTER(IgnoreCppExceptionFilter)
-    {
-        // There can be both C++ (thrown by the COMPlusThrow) and managed exceptions thrown
-        // from the PrepareInitialCode call chain.
-        // We need to process only managed ones here, the C++ ones are handled by the
-        // INSTALL_/UNINSTALL_UNWIND_AND_CONTINUE_HANDLER in the InterpExecMethod.
-        // The managed ones are represented by SEH exception, which cannot be handled there
-        // because it is not possible to handle both SEH and C++ exceptions in the same frame.
-        GCX_COOP_NO_DTOR();
-        OBJECTREF ohThrowable = GET_THREAD()->LastThrownObject();
-        DispatchManagedException(ohThrowable);
-    }
-    PAL_ENDTRY
-}
-
-UMEntryThunkData * GetMostRecentUMEntryThunkData();
-
 void InterpExecMethod(InterpreterFrame *pInterpreterFrame, InterpMethodContextFrame *pFrame, InterpThreadContext *pThreadContext, ExceptionClauseArgs *pExceptionClauseArgs)
 {
     CONTRACTL
@@ -877,9 +832,6 @@ void InterpExecMethod(InterpreterFrame *pInterpreterFrame, InterpMethodContextFr
     int32_t returnOffset, callArgsOffset, methodSlot;
     bool isTailcall = false;
     MethodDesc* targetMethod;
-
-    // Track if we just processed a breakpoint and need to skip pFrame->ip update
-    bool skipFrameIpUpdate = false;
 
     // Track if we just processed a breakpoint and need to skip pFrame->ip update
     bool skipFrameIpUpdate = false;
@@ -3739,7 +3691,6 @@ do                                                                      \
                 default:
                     EEPOLICY_HANDLE_FATAL_ERROR_WITH_MESSAGE(COR_E_EXECUTIONENGINE, W("Unimplemented or invalid interpreter opcode\n"));
                     break;
-                }
             }
         }
         UNINSTALL_UNWIND_AND_CONTINUE_HANDLER;

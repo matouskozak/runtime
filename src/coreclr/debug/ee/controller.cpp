@@ -824,6 +824,9 @@ void DebuggerPatchTable::BindPatch(DebuggerControllerPatch *patch, CORDB_ADDRESS
     _ASSERTE( !patch->IsILPrimaryPatch() );
     _ASSERTE(!patch->IsBound() );
 
+    LOG((LF_CORDB,LL_INFO10000,"DPT:BP Binding patch %p to address %p\n",
+        patch, address));
+
     //Since the actual patch doesn't move, we don't have to worry about
     //zeroing out the opcode field (see lengthy comment above)
     // Since the patch is double-hashed based off Address, if we change the address,
@@ -1497,10 +1500,8 @@ bool DebuggerController::ApplyPatch(DebuggerControllerPatch *patch)
 
     if (patch->IsNativePatch())
     {
-        printf("DC::ApplyPatch IsNativePatch=true, fSaveOpcode=%d, dji=%p, address=%p\n",
-            patch->fSaveOpcode, patch->dji, patch->address);
-        LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch IsNativePatch=true, fSaveOpcode=%d, dji=%p\n",
-            patch->fSaveOpcode, patch->dji));
+        LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch IsNativePatch=true, fSaveOpcode=%d, dji=%p, address=%p\n",
+            patch->fSaveOpcode, patch->dji, patch->address));
 
         if (patch->fSaveOpcode)
         {
@@ -1512,51 +1513,34 @@ bool DebuggerController::ApplyPatch(DebuggerControllerPatch *patch)
         }
 
 #ifdef FEATURE_INTERPRETER
-        // Check if this address belongs to the interpreter
-        IJitManager* pJitManager = ExecutionManager::FindJitMan((PCODE)patch->address);
         InterpreterJitManager* pInterpreterJitManager = ExecutionManager::GetInterpreterJitManager();
-
-        if (pJitManager != NULL && pInterpreterJitManager != NULL && pJitManager == (IJitManager*)pInterpreterJitManager)
-        {
-            printf("DC::ApplyPatch Address is in interpreter code, using INTOP_BREAKPOINT\n");
-            patch->kind = PATCH_KIND_NATIVE_INTERPRETER;
-            patch->opcode = CORDbgGetInstruction(patch->address);
-            *(uint32_t*)(patch->address) = INTOP_BREAKPOINT;
-            printf("DC::ApplyPatch Interpreter breakpoint (INTOP_BREAKPOINT) was inserted at %p for opcode %x\n",
-                patch->address, patch->opcode);
-            return true;
-        }
+        return pInterpreterJitManager->GetExecutionControl()->ApplyPatch(patch);
 #endif // FEATURE_INTERPRETER
 
-        if (patch->dji != NULL)
-        {
-            NativeCodeVersion::OptimizationTier tier = patch->dji->m_nativeCodeVersion.GetOptimizationTier();
+// TODO MATOUS: Revisit interpreter ApplyPatch support
+//         if (patch->dji != NULL)
+//         {
+//             LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch tier=%d, OptimizationTierInterpreted=%d\n",
+//                 (int)tier, (int)NativeCodeVersion::OptimizationTierInterpreted));
 
-            printf("DC::ApplyPatch tier=%d, OptimizationTierInterpreted=%d\n",
-                (int)tier, (int)NativeCodeVersion::OptimizationTierInterpreted);
-            LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch tier=%d, OptimizationTierInterpreted=%d\n",
-                (int)tier, (int)NativeCodeVersion::OptimizationTierInterpreted));
-
-            if (tier == NativeCodeVersion::OptimizationTierInterpreted)
-            {
-                // For interpreter code, we don't patch the bytecode directly.
-                // Instead, we mark the patch as applied and store it in the patch table.
-                // The interpreter will check this table before executing each instruction.
-                patch->kind = PATCH_KIND_NATIVE_INTERPRETER;
-                // Set opcode to a non-zero sentinel value (not a real opcode) to mark as activated
-                patch->opcode = 1;
-                printf("DC::ApplyPatch Interpreter breakpoint registered at bytecode address %p\n",
-                    patch->address);
-                LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch Interpreter breakpoint registered at bytecode address %p\n",
-                    patch->address));
-                return true;
-            }
-        }
-        else
-        {
-            printf("DC::ApplyPatch patch->dji is NULL, cannot check tier\n");
-            LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch patch->dji is NULL, cannot check tier\n"));
-        }
+//             // TODO MATOUS: Why is this needed and what it serves for?
+//             if (tier == NativeCodeVersion::OptimizationTierInterpreted)
+//             {
+//                 // For interpreter code, we don't patch the bytecode directly.
+//                 // Instead, we mark the patch as applied and store it in the patch table.
+//                 // The interpreter will check this table before executing each instruction.
+//                 patch->kind = PATCH_KIND_NATIVE_INTERPRETER;
+//                 // Set opcode to a non-zero sentinel value (not a real opcode) to mark as activated
+//                 patch->opcode = 1;
+//                 LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch Interpreter breakpoint registered at bytecode address %p\n",
+//                     patch->address));
+//                 return true;
+//             }
+//         }
+//         else
+//         {
+//             LOG((LF_CORDB, LL_EVERYTHING, "DC::ApplyPatch patch->dji is NULL, cannot check tier\n"));
+//         }
 
 
 #if _DEBUG
@@ -1662,30 +1646,32 @@ bool DebuggerController::UnapplyPatch(DebuggerControllerPatch *patch)
 
     if (patch->IsNativePatch())
     {
+        // TODO MATOUS: Revisit interpreter UnapplyPatch support
         // For interpreter patches, check if we actually wrote to bytecode
-        if (patch->kind == PATCH_KIND_NATIVE_INTERPRETER)
-        {
-            // If opcode is 1, it's a registration-only patch (no bytecode modification)
-            if (patch->opcode == 1)
-            {
-                InitializePRD(&(patch->opcode));
-                LOG((LF_CORDB, LL_EVERYTHING, "DC::UnapplyPatch Interpreter breakpoint unregistered at bytecode address %p\n",
-                    patch->address));
-                return true;
-            }
-            // Otherwise, we wrote INTOP_BREAKPOINT to bytecode and need to restore it
-            // Bytecode memory doesn't need VirtualProtect, just write directly
-            else
-            {
-                printf("DC::UnapplyPatch Restoring bytecode at %p from INTOP_BREAKPOINT to opcode %x\n",
-                    patch->address, patch->opcode);
-                *(uint32_t*)(patch->address) = patch->opcode;
-                InitializePRD(&(patch->opcode));
-                LOG((LF_CORDB, LL_EVERYTHING, "DC::UnapplyPatch Restored bytecode at %p\n",
-                    patch->address));
-                return true;
-            }
-        }
+        // if (patch->kind == PATCH_KIND_NATIVE_INTERPRETER)
+        // {
+        //     // If opcode is 1, it's a registration-only patch (no bytecode modification)
+        //     if (patch->opcode == 1)
+        //     {
+        //         InitializePRD(&(patch->opcode));
+        //         LOG((LF_CORDB, LL_EVERYTHING, "DC::UnapplyPatch Interpreter breakpoint unregistered at bytecode address %p\n",
+        //             patch->address));
+        //         return true;
+        //     }
+        //     // Otherwise, we wrote INTOP_BREAKPOINT to bytecode and need to restore it
+        //     // Bytecode memory doesn't need VirtualProtect, just write directly
+        //     else
+        //     {
+        //         EECodeInfo codeInfo((PCODE)patch->address);
+        //         if (codeInfo.IsValid())
+        //         {
+        //             IJitManager* pJitMgr = codeInfo.GetJitManager();
+        //             LOG((LF_CORDB, LL_EVERYTHING, "DC::UnapplyPatch Restoring bytecode at %p from INTOP_BREAKPOINT to opcode %x via interpreter\n",
+        //                 patch->address, patch->opcode));
+        //             return pJitMgr->GetExecutionControl()->UnapplyPatch(patch);;
+        //         }
+        //     }
+        // }
 
         if (patch->fSaveOpcode)
         {
@@ -2074,6 +2060,8 @@ BOOL DebuggerController::AddBindAndActivateILReplicaPatch(DebuggerControllerPatc
 
     BOOL result = FALSE;
     MethodDesc* pMD = dji->m_nativeCodeVersion.GetMethodDesc();
+    LOG((LF_CORDB, LL_INFO10000, "DC::BP: Adding IL replica patch for %s::%s (pMD: %p) version %zu\n",
+         pMD->m_pszDebugClassName, pMD->m_pszDebugMethodName, pMD, dji->m_encVersion));
 
     // For interpreter code, IL offsets ARE the execution offsets (bytecode offsets)
     // There's no IL-to-native mapping, so we bind directly to the IL offset
@@ -2376,7 +2364,8 @@ DebuggerControllerPatch *DebuggerController::AddAndActivateNativePatchForAddress
                             NULL,
                             DebuggerPatchTable::DCP_PATCHID_INVALID,
                             traceType);
-
+    LOG((LF_CORDB, LL_INFO10000, "DC::AANPFAD: Added native %s patch %p at addr %p\n",
+        (managed ? "managed" : "unmanaged"), patch, address));
     ActivatePatch(patch);
 
     return patch;
@@ -2691,9 +2680,9 @@ bool DebuggerController::MatchPatch(Thread *thread,
 {
     LOG((LF_CORDB, LL_INFO100000, "DC::MP: EIP:0x%p\n", GetIP(context)));
 
-    printf("DC::MP: patch->address=%p, GetIP(context)=0x%lx, patch->kind=%d\n",
-        patch->address, (unsigned long)GetIP(context), patch->kind);
-    fflush(stdout);
+    LOG((LF_CORDB, LL_INFO10000,
+        "DC::MP: patch->address=0x%p, GetIP(context)=0x%lx, patch->kind=%d, PATCH_KIND_NATIVE_INTERPRETER=%d\n",
+        patch->address, (unsigned long)GetIP(context), patch->kind, PATCH_KIND_NATIVE_INTERPRETER));
 
     // For interpreter patches, we can't compare against the context IP because:
     // - patch->address is the bytecode address
@@ -2704,15 +2693,34 @@ bool DebuggerController::MatchPatch(Thread *thread,
         // Caller should have already matched our addresses.
         if (patch->address != dac_cast<PTR_CORDB_ADDRESS_TYPE>(GetIP(context)))
         {
-            printf("DC::MP: Address mismatch! Returning false\n");
-            fflush(stdout);
+            LOG((LF_CORDB, LL_INFO10000, "DC::MP: patches didn't match b/c of "
+                "address!\n"));
             return false;
+        }
+        else
+        {
+            LOG((LF_CORDB, LL_INFO10000, "DC::MP: Native patch, address match\n"));
         }
     }
     else
     {
-        printf("DC::MP: Interpreter patch, skipping IP check\n");
-        fflush(stdout);
+        // TODO MATOUS: Revisit MatchPatch for interpreter once we have better support
+        // for interpreter debugging.
+// #ifdef FEATURE_INTERPRETER
+//         IJitManager* pJitManager = ExecutionManager::FindJitMan((PCODE)patch->address);
+//         InterpreterJitManager* pInterpreterJitManager = ExecutionManager::GetInterpreterJitManager();
+
+//         if (pJitManager != NULL && pInterpreterJitManager != NULL && pJitManager == pInterpreterJitManager)
+//         {
+//             LOG((LF_CORDB, LL_INFO10000, "DC::MP: Interpreter patch, JitManager match\n"));
+//             return pJitManager->GetExecutionControl()->MatchPatch(patch, context);
+//         }
+//         else
+//         {
+//             LOG((LF_CORDB, LL_INFO10000, "DC::MP: Interpreter patch, but JitManager mismatch!\n"));
+//             return false;
+//         }
+// #endif
     }
 
     // <BUGNUM>RAID 67173 -</BUGNUM> we'll make sure that intermediate patches have NULL
@@ -2801,13 +2809,12 @@ DebuggerPatchSkip *DebuggerController::ActivatePatchSkip(Thread *thread,
     DebuggerControllerPatch *patch = g_patches->GetPatch((CORDB_ADDRESS_TYPE *)PC);
     DebuggerPatchSkip *skip = NULL;
 
-    printf("DC::APS: PC=0x%p, patch=%p\n", PC, patch);
+    LOG((LF_CORDB, LL_INFO10000, "DC::APS: PC=0x%p, patch=%p\n", PC, patch));
     if (patch != NULL)
     {
-        printf("DC::APS: patch->kind=%d, PATCH_KIND_NATIVE_INTERPRETER=%d, patch->address=0x%p\n",
-            patch->kind, PATCH_KIND_NATIVE_INTERPRETER, patch->address);
+        LOG((LF_CORDB, LL_INFO10000, "DC::APS: patch->kind=%d, PATCH_KIND_NATIVE_INTERPRETER=%d, patch->address=0x%p\n",
+            patch->kind, PATCH_KIND_NATIVE_INTERPRETER, patch->address));
     }
-    fflush(stdout);
 
     if (patch != NULL && patch->IsNativePatch())
     {
@@ -2873,8 +2880,7 @@ DPOSS_ACTION DebuggerController::ScanForTriggers(CORDB_ADDRESS_TYPE *address,
     if (g_patches != NULL)
         patch = g_patches->GetPatch(address);
 
-    printf("DC::SFT: g_patches=%p, patch=%p for address %p\n", g_patches, patch, address);
-    fflush(stdout);
+    LOG((LF_CORDB, LL_INFO10000, "DC::SFT: g_patches=%p, patch=%p for address %p\n", g_patches, patch, address));
 
     ULONG iEvent = UINT32_MAX;
     ULONG iEventNext = UINT32_MAX;
@@ -2888,28 +2894,24 @@ DPOSS_ACTION DebuggerController::ScanForTriggers(CORDB_ADDRESS_TYPE *address,
         // we are sure that we care for this exception but not sure
         // if we will send event to the RS
         used = DPOSS_USED_WITH_NO_EVENT;
-        printf("DC::SFT: Setting used=DPOSS_USED_WITH_NO_EVENT (patch=%p)\n", patch);
-        fflush(stdout);
+        LOG((LF_CORDB, LL_INFO10000, "DC::SFT: Setting used=DPOSS_USED_WITH_NO_EVENT (patch=%p)\n", patch));
     }
     else
     {
         // initialize it to don't care for now
         used = DPOSS_DONT_CARE;
-        printf("DC::SFT: Setting used=DPOSS_DONT_CARE\n");
-        fflush(stdout);
+        LOG((LF_CORDB, LL_INFO10000, "DC::SFT: Setting used=DPOSS_DONT_CARE\n"));
     }
 
     TP_RESULT tpr = TPR_IGNORE;
 
-    printf("DC::SFT: stWhat=%d, ST_PATCH=%d, patch=%p\n", stWhat, ST_PATCH, patch);
-    fflush(stdout);
+    LOG((LF_CORDB, LL_INFO10000, "DC::SFT: stWhat=%d, ST_PATCH=%d, patch=%p\n", stWhat, ST_PATCH, patch));
 
     while (stWhat & ST_PATCH &&
            patch != NULL &&
            !fDone)
     {
-        printf("DC::SFT: Entering while loop for patch %p\n", patch);
-        fflush(stdout);
+        LOG((LF_CORDB, LL_INFO10000, "DC::SFT: Entering while loop for patch %p\n", patch));
 
         _ASSERTE(IsInUsedAction(used) == true);
 
@@ -2931,32 +2933,33 @@ DPOSS_ACTION DebuggerController::ScanForTriggers(CORDB_ADDRESS_TYPE *address,
         if (MatchPatch(thread, context, patch))
         {
             LOG((LF_CORDB, LL_INFO10000, "DC::SFT: patch matched\n"));
-            printf("DC::SFT: Patch matched at %p, kind=%d, controller=%p\n",
-                patch->address, patch->kind, patch->controller);
-            fflush(stdout);
+
+            LOG((LF_CORDB, LL_INFO10000,
+                "DC::SFT: Patch matched at %p, kind=%d, controller=%p\n",
+                patch->address, patch->kind, patch->controller));
             AddRefPatch(patch);
 
             // We are hitting a patch at a virtual trace call target, so let's trigger trace call here.
             if (patch->trace.GetTraceType() == TRACE_ENTRY_STUB)
             {
+                LOG((LF_CORDB, LL_INFO10000, "DC::SFT: Triggering TraceCall for TRACE_ENTRY_STUB\n"));
                 patch->controller->TriggerTraceCall(thread, dac_cast<PTR_CBYTE>(::GetIP(context)));
                 tpr = TPR_IGNORE;
-                printf("DC::SFT: TraceCall triggered, tpr=TPR_IGNORE\n");
-                fflush(stdout);
             }
             else
             {
                 // Mark if we're at an unsafe place.
                 AtSafePlaceHolder unsafePlaceHolder(thread);
 
-                printf("DC::SFT: Calling TriggerPatch on controller %p\n", patch->controller);
-                fflush(stdout);
+                LOG((LF_CORDB, LL_INFO10000,
+                    "DC::SFT: Calling TriggerPatch on controller %p\n",
+                    patch->controller));
                 tpr = patch->controller->TriggerPatch(patch,
                                                     thread,
                                                     TY_NORMAL);
-                printf("DC::SFT: TriggerPatch returned tpr=%d (TPR_TRIGGER=%d, TPR_IGNORE=%d)\n",
-                    tpr, TPR_TRIGGER, TPR_IGNORE);
-                fflush(stdout);
+                LOG((LF_CORDB, LL_INFO10000,
+                    "DC::SFT: TriggerPatch returned tpr=%d (TPR_TRIGGER=%d, TPR_IGNORE=%d)\n",
+                    tpr, TPR_TRIGGER, TPR_IGNORE));
             }
 
             // Any patch may potentially send an event.
@@ -2969,8 +2972,9 @@ DPOSS_ACTION DebuggerController::ScanForTriggers(CORDB_ADDRESS_TYPE *address,
                 tpr == TPR_TRIGGER_ONLY_THIS ||
                 tpr == TPR_TRIGGER_ONLY_THIS_AND_LOOP)
             {
-                printf("DC::SFT: Enqueueing controller to dcq\n");
-                fflush(stdout);
+                LOG((LF_CORDB, LL_INFO10000,
+                    "DC::SFT: Enqueueing controller %p to dcq\n",
+                    patch->controller));
                 // Make sure we've still got a valid pointer.
                 patch = (DebuggerControllerPatch *)
                     DebuggerController::g_patches->GetEntryPtr( iEvent );
@@ -2979,8 +2983,9 @@ DPOSS_ACTION DebuggerController::ScanForTriggers(CORDB_ADDRESS_TYPE *address,
             }
             else
             {
-                printf("DC::SFT: NOT enqueueing controller (tpr=%d)\n", tpr);
-                fflush(stdout);
+                LOG((LF_CORDB, LL_INFO10000,
+                    "DC::SFT: Not enqueueing controller %p to dcq\n",
+                    patch->controller));
             }
 
             // Make sure we've got a valid pointer in case TriggerPatch
@@ -3263,13 +3268,11 @@ DPOSS_ACTION DebuggerController::DispatchPatchOrSingleStep(Thread *thread, CONTE
 
     TP_RESULT tpr;
 
-    printf("DC::DPOSS Calling ScanForTriggers at address %p\n", address);
-    fflush(stdout);
+    LOG((LF_CORDB|LF_ENC, LL_EVERYTHING, "DC::DPOSS Calling ScanForTriggers\n"));
     used = ScanForTriggers((CORDB_ADDRESS_TYPE *)address, thread, context, &dcq, which, &tpr);
 
-    printf("DC::DPOSS ScanForTriggers returned, dcq count=%d, used=%d\n", dcq.dcqGetCount(), used);
-    fflush(stdout);
-    LOG((LF_CORDB|LF_ENC, LL_EVERYTHING, "DC::DPOSS ScanForTriggers called and returned.\n"));
+    LOG((LF_CORDB|LF_ENC, LL_EVERYTHING, "DC::DPOSS ScanForTriggers returned, dcq count=%d, used=%d\n",
+        dcq.dcqGetCount(), used));
 
 
     // If we setip, then that will change the address in the context.
@@ -3281,9 +3284,9 @@ DPOSS_ACTION DebuggerController::DispatchPatchOrSingleStep(Thread *thread, CONTE
     // which is different from the native context IP (which points to ExecuteMethod).
     // In this case, we should not check for IP changes since they were never equal.
     isInterpreterBreakpoint = ((TADDR)address != GetIP(context));
-    printf("DC::DPOSS isInterpreterBreakpoint=%d (address=0x%lx, GetIP=0x%lx)\n",
-        isInterpreterBreakpoint, (unsigned long)(TADDR)address, (unsigned long)GetIP(context));
-    fflush(stdout);
+    LOG((LF_CORDB, LL_INFO10000,
+        "DC::DPOSS isInterpreterBreakpoint=%d (address=0x%lx, GetIP=0x%lx)\n",
+        isInterpreterBreakpoint, (unsigned long)(TADDR)address, (unsigned long)GetIP(context)));
 
 #ifdef _DEBUG
     // If we do a SetIP after this point, the value of address will be garbage.  Set it to a distictive pattern now, so
@@ -3309,9 +3312,8 @@ DPOSS_ACTION DebuggerController::DispatchPatchOrSingleStep(Thread *thread, CONTE
         // For interpreter breakpoints, we skip this check because the address parameter (bytecode)
         // and context IP (native) are inherently different.
         bool fIpChanged = !isInterpreterBreakpoint && (originalAddress != GetIP(context));
-        printf("DC::DPOSS fIpChanged check: originalAddress=0x%lx, GetIP(context)=0x%lx, isInterpreter=%d, fIpChanged=%d\n",
-            (unsigned long)originalAddress, (unsigned long)GetIP(context), isInterpreterBreakpoint, fIpChanged);
-        fflush(stdout);
+        LOG((LF_CORDB, LL_INFO10000, "DC::DPOSS fIpChanged check: originalAddress=0x%lx, GetIP(context)=0x%lx, isInterpreter=%d, fIpChanged=%d\n",
+            (unsigned long)originalAddress, (unsigned long)GetIP(context), isInterpreterBreakpoint, fIpChanged));
 
         // Send the events outside of the controller lock
         bool anyEventsSent = false;
@@ -3319,39 +3321,33 @@ DPOSS_ACTION DebuggerController::DispatchPatchOrSingleStep(Thread *thread, CONTE
         dwNumberEvents = dcq.dcqGetCount();
         dwEvent = 0;
 
-        printf("DC::DPOSS Processing %d events\n", dwNumberEvents);
-        fflush(stdout);
+        LOG((LF_CORDB, LL_INFO10000, "DC::DPOSS Processing %d events\n", dwNumberEvents));
 
         while (dwEvent < dwNumberEvents)
         {
             DebuggerController *event = dcq.dcqGetElement(dwEvent);
 
-            printf("DC::DPOSS Event %d: deleted=%d\n", dwEvent, event->m_deleted);
-            fflush(stdout);
+            LOG((LF_CORDB, LL_INFO10000, "DC::DPOSS Event %d: deleted=%d\n", dwEvent, event->m_deleted));
 
             if (!event->m_deleted)
             {
 #ifdef DEBUGGING_SUPPORTED
                 if (AppDomain::GetCurrentDomain()->IsDebuggerAttached())
                 {
-                    printf("DC::DPOSS Calling SendEvent for event %d\n", dwEvent);
-                    fflush(stdout);
+                    LOG((LF_CORDB, LL_INFO10000, "DC::DPOSS Calling SendEvent for event %d\n", dwEvent));
                     if (event->SendEvent(thread, fIpChanged))
                     {
-                        printf("DC::DPOSS SendEvent returned true, setting anyEventsSent=true\n");
-                        fflush(stdout);
+                        LOG((LF_CORDB, LL_INFO10000, "DC::DPOSS SendEvent returned true, setting anyEventsSent=true\n"));
                         anyEventsSent = true;
                     }
                     else
                     {
-                        printf("DC::DPOSS SendEvent returned false\n");
-                        fflush(stdout);
+                        LOG((LF_CORDB, LL_INFO10000, "DC::DPOSS SendEvent returned false\n"));
                     }
                 }
                 else
                 {
-                    printf("DC::DPOSS Debugger not attached\n");
-                    fflush(stdout);
+                    LOG((LF_CORDB, LL_INFO10000, "DC::DPOSS Debugger not attached\n"));
                 }
 #endif //DEBUGGING_SUPPORTED
             }
@@ -3363,18 +3359,15 @@ DPOSS_ACTION DebuggerController::DispatchPatchOrSingleStep(Thread *thread, CONTE
         // deleted before we got a chance to get the EventSending lock.)
         if (anyEventsSent)
         {
-            printf("DC::DPOSS anyEventsSent=true, calling SyncAllThreads\n");
-            fflush(stdout);
+            LOG((LF_CORDB, LL_INFO10000, "DC::DPOSS anyEventsSent=true, calling SyncAllThreads\n"));
             LOG((LF_CORDB|LF_ENC, LL_EVERYTHING, "DC::DPOSS We sent an event\n"));
             g_pDebugger->SyncAllThreads(SENDIPCEVENT_PtrDbgLockHolder);
             LOG((LF_CORDB,LL_INFO1000, "SAT called!\n"));
-            printf("DC::DPOSS SyncAllThreads returned\n");
-            fflush(stdout);
+            LOG((LF_CORDB, LL_INFO10000, "DC::DPOSS SyncAllThreads returned\n"));
         }
         else
         {
-            printf("DC::DPOSS anyEventsSent=false, NOT calling SyncAllThreads\n");
-            fflush(stdout);
+            LOG((LF_CORDB, LL_INFO10000, "DC::DPOSS anyEventsSent=false, NOT calling SyncAllThreads\n"));
         }
 
         SENDIPCEVENT_END;
@@ -4766,15 +4759,12 @@ bool DebuggerController::DispatchNativeException(EXCEPTION_RECORD *pException,
         switch (dwCode)
         {
         case EXCEPTION_BREAKPOINT:
-            printf("DC::DNE EXCEPTION_BREAKPOINT received, NumberParameters=%d\n", pException->NumberParameters);
-            fflush(stdout);
+            LOG((LF_CORDB, LL_EVERYTHING, "DC::DNE BREAKPOINT received, NumberParameters=%d\n", pException->NumberParameters));
             // Check if this is an interpreter breakpoint by examining if we have the special exception information
             // Interpreter breakpoints provide: [0] = bytecode IP, [1] = pFrame, [2] = stack
             if (pException->NumberParameters >= 3 && pException->ExceptionInformation[1] != 0)
             {
                 // This is an interpreter breakpoint with bytecode information
-                printf("DC::DNE Interpreter Breakpoint detected with bytecode info\n");
-                fflush(stdout);
                 LOG(
                     (LF_CORDB,
                         LL_INFO1000,
@@ -4788,8 +4778,7 @@ bool DebuggerController::DispatchNativeException(EXCEPTION_RECORD *pException,
             }
             else
             {
-                printf("DC::DNE Regular breakpoint (not interpreter)\n");
-                fflush(stdout);
+                LOG((LF_CORDB, LL_INFO1000, "DC::DNE Regular breakpoint (not interpreter)\n"));
             }
             // EIP should be properly set up at this point.
             result = DebuggerController::DispatchPatchOrSingleStep(pCurThread,
@@ -5310,13 +5299,37 @@ DebuggerBreakpoint::DebuggerBreakpoint(Module *module,
     _ASSERTE(native || nativeJITInfo == NULL);
     _ASSERTE(!nativeJITInfo || nativeJITInfo->m_jitComplete); // this is sent by the left-side, and it couldn't have got the code if the JIT wasn't complete
 
+    LOG((LF_CORDB, LL_INFO10000,
+         "DB::DB: Breakpoint at module 0x%p md 0x%08x offset 0x%zx "
+         "native %d ilEnCVersion %zu nativeMethodDesc 0x%p "
+         "nativeJITInfo 0x%p nativeCodeBindAllVersions %d\n",
+         module, md, offset, native, ilEnCVersion,
+         nativeMethodDesc, nativeJITInfo, nativeCodeBindAllVersions));
+
     if (native && !nativeCodeBindAllVersions)
     {
+        LOG((LF_CORDB, LL_INFO10000,
+             "DB::DB: Adding native managed patch for method desc 0x%p "
+             "JIT info 0x%p offset 0x%zx\n",
+             nativeMethodDesc, nativeJITInfo, offset));
         (*pSucceed) = AddBindAndActivateNativeManagedPatch(nativeMethodDesc, nativeJITInfo, offset, LEAF_MOST_FRAME, pAppDomain);
     }
     else
     {
         _ASSERTE(!native || offset == 0);
+        LPCUTF8 methodName = "NULL";
+        MethodDesc *pMD = module->LookupMethodDef(md);
+        if (pMD != NULL)
+        {
+            methodName = pMD->m_pszDebugMethodName;
+        }
+        else
+        {
+            module->GetMDImport()->GetNameOfMethodDef(md, &methodName);
+        }
+        LOG((LF_CORDB, LL_INFO10000,
+             "DB::DB: Adding IL patch for module 0x%p md 0x%08x offset 0x%zx, methodName:%s\n",
+             module, md, offset, methodName));
         (*pSucceed) = AddILPatch(pAppDomain, module, md, NULL, ilEnCVersion, offset, !native);
     }
 }

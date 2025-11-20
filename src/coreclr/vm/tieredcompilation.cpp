@@ -287,6 +287,13 @@ void TieredCompilationManager::AsyncPromoteToTier1(
     // interval the new code entry won't be activated.
     MethodDesc *pMethodDesc = currentNativeCodeVersion.GetMethodDesc();
 
+    // Don't promote interpreted code to JIT - interpreted code should stay interpreted
+    // TOD MATOUS: Do we need this?
+    // if (currentNativeCodeVersion.GetOptimizationTier() == NativeCodeVersion::OptimizationTierInterpreted)
+    // {
+    //     return;
+    // }
+
     NativeCodeVersion::OptimizationTier nextTier = NativeCodeVersion::OptimizationTier1;
 
 #ifdef FEATURE_PGO

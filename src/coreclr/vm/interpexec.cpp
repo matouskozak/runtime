@@ -36,20 +36,17 @@ LONG IgnoreCppExceptionFilter(PEXCEPTION_POINTERS pExceptionInfo, PVOID pv)
 {
     DWORD exceptionCode = pExceptionInfo->ExceptionRecord->ExceptionCode;
 
-    printf("IgnoreCppExceptionFilter: Exception code = 0x%X, STATUS_BREAKPOINT = 0x%X\n", exceptionCode, STATUS_BREAKPOINT);
-    fflush(stdout);
+    LOG((LF_CORDB, LL_INFO10000, "IgnoreCppExceptionFilter: Exception code = 0x%X, STATUS_BREAKPOINT = 0x%X\n", exceptionCode, STATUS_BREAKPOINT));
 
     // Handle breakpoints and single steps by notifying the debugger
     if (exceptionCode == STATUS_BREAKPOINT || exceptionCode == STATUS_SINGLE_STEP)
     {
-        printf("IgnoreCppExceptionFilter: Handling debugger exception 0x%X\n", exceptionCode);
-        fflush(stdout);
+        LOG((LF_CORDB, LL_INFO10000, "IgnoreCppExceptionFilter: Handling debugger exception 0x%X\n", exceptionCode));
 
         Thread *pThread = GetThread();
         if (pThread != NULL && g_pDebugInterface != NULL)
         {
-            printf("IgnoreCppExceptionFilter: Notifying debugger via FirstChanceNativeException\n");
-            fflush(stdout);
+            LOG((LF_CORDB, LL_INFO10000, "IgnoreCppExceptionFilter: Notifying debugger via FirstChanceNativeException\n"));
 
             // Notify the debugger of the exception
             bool handled = g_pDebugInterface->FirstChanceNativeException(
@@ -58,8 +55,7 @@ LONG IgnoreCppExceptionFilter(PEXCEPTION_POINTERS pExceptionInfo, PVOID pv)
                 exceptionCode,
                 pThread);
 
-            printf("IgnoreCppExceptionFilter: FirstChanceNativeException returned %d\n", handled);
-            fflush(stdout);
+            LOG((LF_CORDB, LL_INFO10000, "IgnoreCppExceptionFilter: FirstChanceNativeException returned %d\n", handled));
 
             // Return EXCEPTION_EXECUTE_HANDLER so the PAL_EXCEPTION handler runs
             // The handler will just return and execution will continue
@@ -67,21 +63,18 @@ LONG IgnoreCppExceptionFilter(PEXCEPTION_POINTERS pExceptionInfo, PVOID pv)
         }
         else
         {
-            printf("IgnoreCppExceptionFilter: No thread or debugger interface, continuing search\n");
-            fflush(stdout);
+            LOG((LF_CORDB, LL_INFO10000, "IgnoreCppExceptionFilter: No thread or debugger interface, continuing search\n"));
             return EXCEPTION_CONTINUE_SEARCH;
         }
     }
 
     if (exceptionCode == EXCEPTION_MSVC)
     {
-        printf("IgnoreCppExceptionFilter: Returning EXCEPTION_CONTINUE_SEARCH for C++ exception\n");
-        fflush(stdout);
+        LOG((LF_CORDB, LL_INFO10000, "IgnoreCppExceptionFilter: Returning EXCEPTION_CONTINUE_SEARCH for C++ exception\n"));
         return EXCEPTION_CONTINUE_SEARCH;
     }
 
-    printf("IgnoreCppExceptionFilter: Returning EXCEPTION_EXECUTE_HANDLER for code 0x%X\n", exceptionCode);
-    fflush(stdout);
+    LOG((LF_CORDB, LL_INFO10000, "IgnoreCppExceptionFilter: Returning EXCEPTION_EXECUTE_HANDLER for code 0x%X\n", exceptionCode));
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
@@ -485,7 +478,11 @@ static void InterpBreakpoint(const int32_t *ip, InterpMethodContextFrame *pFrame
     printf("InterpBreakpoint: Hit at bytecode %p\n", ip);
     fflush(stdout);
 
-    const ULONG_PTR info[3] = {(const ULONG_PTR)ip, (const ULONG_PTR)pFrame, (const ULONG_PTR)stack};
+    const ULONG_PTR info[3] = {
+        (const ULONG_PTR)ip,        // Bytecode address
+        (const ULONG_PTR)pFrame,    // Interpreter frame pointer
+        (const ULONG_PTR)stack      // Stack pointer
+    };
     RaiseException(STATUS_BREAKPOINT, 0, 3, info);
 
     printf("InterpBreakpoint: Resumed after breakpoint\n");
@@ -877,10 +874,9 @@ MAIN_LOOP:
 #if defined(DEBUG) || defined(DEBUGGING_SUPPORTED)
                 case INTOP_BREAKPOINT:
                 {
-                    printf("\n*** BREAKPOINT HIT at ip=%p, pFrame->ip=%p ***\n", ip, pFrame->ip);
-                    printf("*** Opcodes around breakpoint: [ip-12]=0x%x [ip-8]=0x%x [ip-4]=0x%x [ip]=0x%x ***\n",
-                        *(ip-3), *(ip-2), *(ip-1), *ip);
-                    fflush(stdout);
+                    LOG((LF_CORDB, LL_INFO1000, "\n*** BREAKPOINT HIT at ip=%p, pFrame->ip=%p ***\n", ip, pFrame->ip));
+                    LOG((LF_CORDB, LL_INFO1000, "*** Opcodes around breakpoint: [ip-12]=0x%x [ip-8]=0x%x [ip-4]=0x%x [ip]=0x%x ***\n",
+                        *(ip-3), *(ip-2), *(ip-1), *ip));
 
                     // Need to handle the breakpoint exception in its own PAL_TRY block
                     // because we're inside a C++ try block that would catch it first
@@ -902,8 +898,7 @@ MAIN_LOOP:
                     }
                     PAL_ENDTRY
 
-                    printf("*** BREAKPOINT RETURNED, opcode now 0x%x, setting skipFrameIpUpdate=true ***\n", *ip);
-                    fflush(stdout);
+                    LOG((LF_CORDB, LL_INFO1000, "*** BREAKPOINT RETURNED, opcode now 0x%x, setting skipFrameIpUpdate=true ***\n", *ip));
 
                     // After the debugger processes the breakpoint, the bytecode has been
                     // restored to the original opcode by UnapplyPatch. We need to re-execute

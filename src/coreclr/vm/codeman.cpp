@@ -29,6 +29,7 @@
 #include "strsafe.h"
 
 #include "configuration.h"
+#include "../debug/ee/executioncontrol.h"
 
 #include <minipal/cpufeatures.h>
 #include <minipal/cpuid.h>
@@ -4566,6 +4567,14 @@ void InterpreterJitManager::JitTokenToMethodRegionInfo(const METHODTOKEN& Method
     methodRegionInfo->coldStartAddress = 0;
     methodRegionInfo->coldSize         = 0;
 }
+
+#if !defined(DACCESS_COMPILE)
+IExecutionControl* InterpreterJitManager::GetExecutionControl()
+{
+    LIMITED_METHOD_CONTRACT;
+    return InterpreterExecutionControl::GetInstance();
+}
+#endif // !DACCESS_COMPILE
 
 #endif // FEATURE_INTERPRETER
 

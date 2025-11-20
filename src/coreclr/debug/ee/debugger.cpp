@@ -4809,7 +4809,16 @@ HRESULT Debugger::MapAndBindFunctionPatches(DebuggerJitInfo *djiNew,
             // when the EnCBreakpoint patches are included.
             if (dcp->key.module != pModule || dcp->key.md != md)
             {
+                // TODO MATOUS: It seems like the patches are being attached to different method definitions. Is it possible that because we call JITCompleted with precode?
                 LOG((LF_CORDB, LL_INFO10000, "D::MABFP: Patch not in this method\n"));
+                
+                LPCUTF8 patchMethodName = "NULL";
+                if (dcp->key.module != NULL)
+                {
+                    dcp->key.module->GetMDImport()->GetNameOfMethodDef(dcp->key.md, &patchMethodName);
+                }
+                LOG((LF_CORDB, LL_INFO10000, "D::MABFP: Patch module: %p, methodDef: %x, methodName: %s\n", dcp->key.module, dcp->key.md, patchMethodName));
+                LOG((LF_CORDB, LL_INFO10000, "D::MABFP: Current module: %p, methodDef: %x, methodName: %s\n", pModule, md, fd->m_pszDebugMethodName));
                 continue;
             }
 
@@ -5441,7 +5450,7 @@ bool Debugger::FirstChanceNativeException(EXCEPTION_RECORD *exception,
     }
     CONTRACTL_END;
 
-
+    LOG((LF_CORDB, LL_INFO10000, "D::FCNE: FirstChanceNativeException called with code 0x%x\n", code));
     // Ignore any notification exceptions sent from code:Debugger.SendRawEvent.
     // This is not a common case, but could happen in some cases described
     // in SendRawEvent. Either way, Left-Side and VM should just ignore these.
@@ -10370,7 +10379,13 @@ bool Debugger::HandleIPCEvent(DebuggerIPCEvent * pEvent)
             // Also, we can't know if a breakpoint is ok
             // prior to the method being JITted.
             //
-
+            LOG((LF_CORDB,LL_INFO10000, "D::HIPCE: BP ADD requested:"
+                 " mod=0x%08x tok=0x%08x off=0x%x isIL=%d dm=0x%x\n",
+                 pEvent->BreakpointData.vmDomainAssembly.GetRawPtr(),
+                 pEvent->BreakpointData.funcMetadataToken,
+                 pEvent->BreakpointData.offset,
+                 pEvent->BreakpointData.isIL,
+                 pEvent->vmAppDomain.GetRawPtr()));
             _ASSERTE(hr == S_OK);
             DebuggerBreakpoint * pDebuggerBP = NULL;
 
@@ -10379,9 +10394,22 @@ bool Debugger::HandleIPCEvent(DebuggerIPCEvent * pEvent)
             DebuggerMethodInfo * pDMI = GetOrCreateMethodInfo(pModule, pEvent->BreakpointData.funcMetadataToken);
             MethodDesc * pMethodDesc = pEvent->BreakpointData.nativeCodeMethodDescToken.UnWrap();
 
+            LPCUTF8 methodName = "NULL";
+            if (pMethodDesc != NULL)
+            {
+                methodName = pMethodDesc->m_pszDebugMethodName;
+            }
+            else
+            {
+                pModule->GetMDImport()->GetNameOfMethodDef(pEvent->BreakpointData.funcMetadataToken, &methodName);
+            }
+            LOG((LF_CORDB,LL_INFO10000,"\tBP Add: module:0x%x DMI:0x%x MD:0x%x, methodName:%s\n",
+                 pModule, pDMI, pMethodDesc, methodName));
+
             DebuggerJitInfo * pDJI =  NULL;
             if ((pMethodDesc != NULL) && (pDMI != NULL))
             {
+                LOG((LF_CORDB,LL_INFO10000,"\tBP Add: found MD:0x%x\n", pMethodDesc));
                 pDJI = pDMI->FindOrCreateInitAndAddJitInfo(pMethodDesc, PINSTRToPCODE(dac_cast<TADDR>(pEvent->BreakpointData.codeStartAddress)));
             }
 
@@ -10390,6 +10418,7 @@ bool Debugger::HandleIPCEvent(DebuggerIPCEvent * pEvent)
                 // we'll put a patch in by offset, implicitly relative
                 // to the first version of the code.
                 fSuccess = FALSE;
+                LOG((LF_CORDB,LL_INFO10000,"\tBP Add: creating DebuggerBreakpoint\n"));
                 pDebuggerBP = new (interopsafe, nothrow) DebuggerBreakpoint(pModule,
                                                                             pEvent->BreakpointData.funcMetadataToken,
                                                                             pEvent->vmAppDomain.GetRawPtr(),
@@ -10416,8 +10445,8 @@ bool Debugger::HandleIPCEvent(DebuggerIPCEvent * pEvent)
                 hr = E_OUTOFMEMORY;
             }
 
-            LOG((LF_CORDB,LL_INFO10000,"\tBP Add: BPTOK:"
-                "0x%x, tok=0x%08x, offset=0x%x, isIL=%d dm=0x%x m=0x%x\n",
+            LOG((LF_CORDB,LL_INFO10000,"\tBP Added: pBP="
+                "0x%x, tok=0x%08x, offset=0x%x, isIL=%d pDebuggerModule=0x%x pModule=0x%x\n",
                  pDebuggerBP,
                  pEvent->BreakpointData.funcMetadataToken,
                  pEvent->BreakpointData.offset,

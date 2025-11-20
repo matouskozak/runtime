@@ -9,8 +9,11 @@ namespace HelloWorld
     {
         private static void Main(string[] args)
         {
+            Console.WriteLine("Starting Hello World");
+            var x = 1;
             System.Diagnostics.Debugger.Break();
-            Console.WriteLine("Hello World!");
+            Console.WriteLine("Ending Hello World!");
+            return;
         }
     }
 }

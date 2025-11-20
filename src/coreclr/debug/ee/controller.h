@@ -17,6 +17,7 @@
 #if !defined(DACCESS_COMPILE)
 
 #include "frameinfo.h"
+#include "executioncontrol.h"
 
 /* ------------------------------------------------------------------------- *
  * Forward declarations
@@ -462,6 +463,7 @@ public:
     BOOL IsILPrimaryPatch();
     BOOL IsILReplicaPatch();
     DebuggerPatchKind  GetKind();
+    void SetKind(DebuggerPatchKind newKind);
 
     // A patch has DJI if it was created with it or if it has been mapped to a
     // function that has been jitted while JIT tracking was on.  It does not

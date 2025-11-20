@@ -896,13 +896,14 @@ void DebuggerJitInfo::LazyInitBounds()
     if (m_fAttemptInit)
         return;
 
+    // TODO MATOUS: It seems to work without this as well.
     // For interpreter code, skip bounds initialization - there's no native debug info
-    if (this->m_nativeCodeVersion.GetOptimizationTier() == NativeCodeVersion::OptimizationTierInterpreted)
-    {
-        Debugger::DebuggerDataLockHolder debuggerDataLockHolder(g_pDebugger);
-        m_fAttemptInit = true;
-        return;
-    }
+    // if (this->m_nativeCodeVersion.GetOptimizationTier() == NativeCodeVersion::OptimizationTierInterpreted)
+    // {
+    //     Debugger::DebuggerDataLockHolder debuggerDataLockHolder(g_pDebugger);
+    //     m_fAttemptInit = true;
+    //     return;
+    // }
 
     EX_TRY
     {

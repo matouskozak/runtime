@@ -2683,8 +2683,8 @@ size_t InterpreterCodeManager::GetFunctionSize(GCInfoToken gcInfoToken)
             );
 
     UINT32 codeLength = gcInfoDecoder.GetCodeLength();
+    LOG((LF_GCINFO, LL_INFO1000, "InterpreterCodeManager::GetFunctionSize: codeLength=%u\n", codeLength));
     _ASSERTE( codeLength > 0 );
-    printf("Function size: %u\n", codeLength);
     return codeLength;
 }
 

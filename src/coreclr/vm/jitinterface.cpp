@@ -13251,8 +13251,10 @@ static TADDR UnsafeJitFunctionWorker(
         // Notify the debugger that we have successfully jitted the function
         // For interpreter code, skip this - the caller will notify after setting up the precode
         //
+        // TODO MATOUS: Revisit if we can't handle interpreter code here.
         if (g_pDebugInterface && !isInterpreterCode)
         {
+            LOG((LF_CORDB, LL_EVERYTHING, "Notifying debugger of JITted code...\n"));
             g_pDebugInterface->JITComplete(nativeCodeVersion, (TADDR)nativeEntry);
 
             // Validation currently disabled, see https://github.com/dotnet/runtime/issues/117561
@@ -13475,7 +13477,7 @@ PCODE UnsafeJitFunction(PrepareCodeConfig* config,
         }
 
         CInterpreterJitInfo interpreterJitInfo{ config, ftn, ILHeader, interpreterMgr };
-        ret = UnsafeJitFunctionWorker(interpreterMgr, &interpreterJitInfo, interpretedVersion, pSizeOfCode, TRUE /* isInterpreterCode */);
+        ret = UnsafeJitFunctionWorker(interpreterMgr, &interpreterJitInfo, interpretedVersion, pSizeOfCode, /* isInterpreterCode */ true);
 
         // If successful, record data.
         if (ret)
@@ -13522,13 +13524,19 @@ PCODE UnsafeJitFunction(PrepareCodeConfig* config,
             // Associate the bytecode address with the NativeCodeVersion
             // This allows the debugger to find the version via GetNativeCodeVersion(pMethod, bytecodeAddr)
             interpretedVersion.SetNativeCodeInterlocked(ret);
-
-            // Notify the debugger that the method is now available for debugging in the interpreter
-            // This allows breakpoints to be bound to the interpreter bytecode
-            if (g_pDebugInterface)
-            {
-                g_pDebugInterface->JITComplete(interpretedVersion, ret);
-            }
+// TODO MATOUS: Revisit how should we handle debugger notifications for interpreted methods
+// What address should we notify the debugger about?
+// #if defined(DEBUGGING_SUPPORTED)
+//             // Notify the debugger that the method is now available for debugging in the interpreter
+//             // This allows breakpoints to be bound to the interpreter bytecode
+//             if (g_pDebugInterface)
+//             {
+//                 g_pDebugInterface->JITComplete(interpretedVersion, ret);
+//                 LOG((LF_CORDB, LL_EVERYTHING, "Debugger notification completed for %s::%s\n",
+//                     ftn->m_pszDebugClassName, ftn->m_pszDebugMethodName));
+//             }
+//             LOG((LF_CORDB, LL_EVERYTHING, "After DEBUGGING_SUPPORTED block, ret=0x%p\n", ret));
+// #endif // DEBUGGING_SUPPORTED
         }
     }
 #endif // FEATURE_INTERPRETER
@@ -13622,6 +13630,9 @@ PCODE UnsafeJitFunction(PrepareCodeConfig* config,
     t_cMethodsJittedForThread++;
 
     LogJitMethodEnd(ftn);
+
+    LOG((LF_CORDB, LL_EVERYTHING, "UnsafeJitFunction: About to return ret=0x%p for %s::%s\n", ret, 
+           ftn->m_pszDebugClassName, ftn->m_pszDebugMethodName));
 
     COOPERATIVE_TRANSITION_END();
     return ret;

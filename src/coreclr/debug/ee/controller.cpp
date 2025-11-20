@@ -1425,10 +1425,7 @@ bool DebuggerController::BindPatch(DebuggerControllerPatch *patch,
     _ASSERTE(!g_pEEInterface->IsStub((const BYTE *)startAddr));
 
     // If we've jitted, map to a native offset.
-    // For patches that already have a DJI attached (e.g., during JITComplete), use that
-    // instead of looking it up again. This is important for interpreter code where the
-    // startAddr is a bytecode address, not a native code address.
-    DebuggerJitInfo *info = patch->HasDJI() ? patch->GetDJI() : g_pDebugger->GetJitInfo(pMD, (const BYTE *)startAddr);
+    DebuggerJitInfo *info = g_pDebugger->GetJitInfo(pMD, (const BYTE *)startAddr);
 
 #ifdef LOGGING
     if (info == NULL)

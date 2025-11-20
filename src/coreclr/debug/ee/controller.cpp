@@ -1513,8 +1513,10 @@ bool DebuggerController::ApplyPatch(DebuggerControllerPatch *patch)
         }
 
 #ifdef FEATURE_INTERPRETER
+        IJitManager* pJitManager = ExecutionManager::FindJitMan((PCODE)patch->address);
         InterpreterJitManager* pInterpreterJitManager = ExecutionManager::GetInterpreterJitManager();
-        return pInterpreterJitManager->GetExecutionControl()->ApplyPatch(patch);
+        if (pJitManager == pInterpreterJitManager)
+            return pInterpreterJitManager->GetExecutionControl()->ApplyPatch(patch);
 #endif // FEATURE_INTERPRETER
 
 // TODO MATOUS: Revisit interpreter ApplyPatch support
@@ -6710,6 +6712,16 @@ void DebuggerStepper::TrapStepOut(ControllerStackInfo *info, bool fForceTraditio
 
     while (info->HasReturnFrame())
     {
+        if (info->m_activeFrame.md != nullptr)
+        {
+            LOG((LF_CORDB, LL_INFO10000, "DS::TSO: Walking up stack from %s::%s\n",
+                info->m_activeFrame.md->m_pszDebugClassName,
+                info->m_activeFrame.md->m_pszDebugMethodName));
+        }
+        LOG((LF_CORDB, LL_INFO10000, "DS::TSO FP:0x%p, PC:0x%p, relOffset:0x%x\n",
+            info->m_activeFrame.fp,
+            (BYTE*)GetControlPC(&(info->m_activeFrame.registers)),
+            info->m_activeFrame.relOffset));
 
 #ifdef _DEBUG
         dbgLastFP = info->m_activeFrame.fp;
@@ -6791,6 +6803,17 @@ void DebuggerStepper::TrapStepOut(ControllerStackInfo *info, bool fForceTraditio
                 if (!fForceTraditional && !this->IsInterestingFrame(&info->m_activeFrame))
                     continue;
 
+                if (info->m_activeFrame.md != nullptr)
+                {
+                    LOG((LF_CORDB, LL_INFO10000, "DS::TSO: Walking up stack from %s::%s\n",
+                        info->m_activeFrame.md->m_pszDebugClassName,
+                        info->m_activeFrame.md->m_pszDebugMethodName));
+                }
+                LOG((LF_CORDB, LL_INFO10000, "DS::TSO FP:0x%p, PC:0x%p, relOffset:0x%x\n",
+                    info->m_activeFrame.fp,
+                    (BYTE*)GetControlPC(&(info->m_activeFrame.registers)),
+                    info->m_activeFrame.relOffset));
+
                 dji = info->m_activeFrame.GetJitInfoFromFrame();
                 _ASSERTE(dji != NULL);
 
@@ -6798,6 +6821,10 @@ void DebuggerStepper::TrapStepOut(ControllerStackInfo *info, bool fForceTraditio
                 // in that, and it was causing problems creating a stepper while sitting in PInvoke stubs after we'd
                 // returned from the unmanaged function that had been called.
                 ULONG reloffset = info->m_activeFrame.relOffset;
+
+                LOG((LF_CORDB, LL_INFO10000,
+                     "DS::TSO: normally managed code at offset 0x%x\n",
+                     reloffset));
 
                 AddBindAndActivateNativeManagedPatch(info->m_activeFrame.md,
                     dji,

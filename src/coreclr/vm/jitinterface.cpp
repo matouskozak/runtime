@@ -13469,15 +13469,15 @@ PCODE UnsafeJitFunction(PrepareCodeConfig* config,
     {
         // Create a NativeCodeVersion for the interpreter before compilation
         // This allows the debugger to discover the method via GetNativeCodeVersion
-        NativeCodeVersion interpretedVersion;
-        {
-            CodeVersionManager::LockHolder codeVersioningLockHolder;
-            ILCodeVersion ilCodeVersion = config->GetCodeVersion().GetILCodeVersion();
-            ilCodeVersion.AddNativeCodeVersion(ftn, NativeCodeVersion::OptimizationTierInterpreted, &interpretedVersion);
-        }
+        // NativeCodeVersion interpretedVersion;
+        // {
+        //     CodeVersionManager::LockHolder codeVersioningLockHolder;
+        //     ILCodeVersion ilCodeVersion = config->GetCodeVersion().GetILCodeVersion();
+        //     ilCodeVersion.AddNativeCodeVersion(ftn, NativeCodeVersion::OptimizationTierInterpreted, &interpretedVersion);
+        // }
 
         CInterpreterJitInfo interpreterJitInfo{ config, ftn, ILHeader, interpreterMgr };
-        ret = UnsafeJitFunctionWorker(interpreterMgr, &interpreterJitInfo, interpretedVersion, pSizeOfCode, /* isInterpreterCode */ true);
+        ret = UnsafeJitFunctionWorker(interpreterMgr, &interpreterJitInfo, nativeCodeVersion, pSizeOfCode, /* isInterpreterCode */ true);
 
         // If successful, record data.
         if (ret)
@@ -13523,7 +13523,7 @@ PCODE UnsafeJitFunction(PrepareCodeConfig* config,
 
             // Associate the bytecode address with the NativeCodeVersion
             // This allows the debugger to find the version via GetNativeCodeVersion(pMethod, bytecodeAddr)
-            interpretedVersion.SetNativeCodeInterlocked(ret);
+            // interpretedVersion.SetNativeCodeInterlocked(ret);
 // TODO MATOUS: Revisit how should we handle debugger notifications for interpreted methods
 // What address should we notify the debugger about?
 // #if defined(DEBUGGING_SUPPORTED)

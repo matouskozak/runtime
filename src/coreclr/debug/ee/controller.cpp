@@ -2063,19 +2063,22 @@ BOOL DebuggerController::AddBindAndActivateILReplicaPatch(DebuggerControllerPatc
     LOG((LF_CORDB, LL_INFO10000, "DC::BP: Adding IL replica patch for %s::%s (pMD: %p) version %zu\n",
          pMD->m_pszDebugClassName, pMD->m_pszDebugMethodName, pMD, dji->m_encVersion));
 
+    // TODO MATOUS: Revisit interpreter support
     // For interpreter code, IL offsets ARE the execution offsets (bytecode offsets)
     // There's no IL-to-native mapping, so we bind directly to the IL offset
-    if (dji->m_nativeCodeVersion.GetOptimizationTier() == NativeCodeVersion::OptimizationTierInterpreted)
-    {
-        // For interpreter, bind breakpoint at the IL offset directly
-        SIZE_T ilOffset = primary->offsetIsIL ? primary->offset : 0;
-        INDEBUG(BOOL fOk = )
-            AddBindAndActivatePatchForMethodDesc(pMD, dji,
-                ilOffset, PATCH_KIND_IL_REPLICA,
-                LEAF_MOST_FRAME, m_pAppDomain);
-        _ASSERTE(fOk);
-        return TRUE;
-    }
+    // if (dji->m_nativeCodeVersion.GetOptimizationTier() == NativeCodeVersion::OptimizationTierInterpreted)
+    // {
+    //     // For interpreter, bind breakpoint at the IL offset directly
+    //     SIZE_T ilOffset = primary->offsetIsIL ? primary->offset : 0;
+    //     LOG((LF_CORDB, LL_INFO10000, "DC::BP: Adding IL replica patch for interpreter code at IL offset 0x%zx\n",
+    //         ilOffset));
+    //     INDEBUG(BOOL fOk = )
+    //         AddBindAndActivatePatchForMethodDesc(pMD, dji,
+    //             ilOffset, PATCH_KIND_IL_REPLICA,
+    //             LEAF_MOST_FRAME, m_pAppDomain);
+    //     _ASSERTE(fOk);
+    //     return TRUE;
+    // }
 
     if (primary->offsetIsIL == 0)
     {

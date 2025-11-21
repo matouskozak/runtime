@@ -1510,10 +1510,10 @@ bool DebuggerController::ApplyPatch(DebuggerControllerPatch *patch)
         }
 
 #ifdef FEATURE_INTERPRETER
-        IJitManager* pJitManager = ExecutionManager::FindJitMan((PCODE)patch->address);
-        InterpreterJitManager* pInterpreterJitManager = ExecutionManager::GetInterpreterJitManager();
-        if (pJitManager == pInterpreterJitManager)
-            return pInterpreterJitManager->GetExecutionControl()->ApplyPatch(patch);
+        EECodeInfo codeInfo((PCODE)patch->address);
+        IJitManager* pJitManager = codeInfo.GetJitManager();
+        if (pJitManager == ExecutionManager::GetInterpreterJitManager())
+            return pJitManager->GetExecutionControl()->ApplyPatch(patch);
 #endif // FEATURE_INTERPRETER
 
 // TODO MATOUS: Revisit interpreter ApplyPatch support
@@ -1645,6 +1645,13 @@ bool DebuggerController::UnapplyPatch(DebuggerControllerPatch *patch)
 
     if (patch->IsNativePatch())
     {
+#ifdef FEATURE_INTERPRETER
+        EECodeInfo codeInfo((PCODE)patch->address);
+        IJitManager* pJitManager = codeInfo.GetJitManager();
+        if (pJitManager == ExecutionManager::GetInterpreterJitManager())
+            return pJitManager->GetExecutionControl()->UnapplyPatch(patch);
+#endif // FEATURE_INTERPRETER
+
         // TODO MATOUS: Revisit interpreter UnapplyPatch support
         // For interpreter patches, check if we actually wrote to bytecode
         // if (patch->kind == PATCH_KIND_NATIVE_INTERPRETER)
@@ -2680,10 +2687,10 @@ bool DebuggerController::MatchPatch(Thread *thread,
                                     CONTEXT *context,
                                     DebuggerControllerPatch *patch)
 {
-    LOG((LF_CORDB, LL_INFO100000, "DC::MP: EIP:0x%p\n", GetIP(context)));
+    LOG((LF_CORDB, LL_INFO100000, "DC::MatchPatch: EIP:0x%p\n", GetIP(context)));
 
     LOG((LF_CORDB, LL_INFO10000,
-        "DC::MP: patch->address=0x%p, GetIP(context)=0x%lx, patch->kind=%d, PATCH_KIND_NATIVE_INTERPRETER=%d\n",
+        "DC::MatchPatch: patch->address=0x%p, GetIP(context)=0x%lx, patch->kind=%d, PATCH_KIND_NATIVE_INTERPRETER=%d\n",
         patch->address, (unsigned long)GetIP(context), patch->kind, PATCH_KIND_NATIVE_INTERPRETER));
 
     // For interpreter patches, we can't compare against the context IP because:
@@ -2695,17 +2702,20 @@ bool DebuggerController::MatchPatch(Thread *thread,
         // Caller should have already matched our addresses.
         if (patch->address != dac_cast<PTR_CORDB_ADDRESS_TYPE>(GetIP(context)))
         {
-            LOG((LF_CORDB, LL_INFO10000, "DC::MP: patches didn't match b/c of "
+            LOG((LF_CORDB, LL_INFO10000, "DC::MatchPatch: patches didn't match b/c of "
                 "address!\n"));
             return false;
         }
-        else
-        {
-            LOG((LF_CORDB, LL_INFO10000, "DC::MP: Native patch, address match\n"));
-        }
     }
-    else
-    {
+    // else
+    // {
+    //     LOG((LF_CORDB, LL_INFO10000, "DC::MatchPatch: Interpreter patch, patch->address=0x%p, context IP=0x%lx, context SP=0x%lx, context FP=0x%lx\n",
+    //         patch->address, (unsigned long)GetIP(context), (unsigned long)GetSP(context), (unsigned long)GetFP(context)));
+    // }
+    // else
+    // {
+    //     LOG((LF_CORDB, LL_INFO10000, "DC::MatchPatch: Interpreter patch, no matching right now\n"));
+        // return true;
         // TODO MATOUS: Revisit MatchPatch for interpreter once we have better support
         // for interpreter debugging.
 // #ifdef FEATURE_INTERPRETER
@@ -2723,18 +2733,20 @@ bool DebuggerController::MatchPatch(Thread *thread,
 //             return false;
 //         }
 // #endif
-    }
+    // }
 
     // <BUGNUM>RAID 67173 -</BUGNUM> we'll make sure that intermediate patches have NULL
     // pAppDomain so that we don't end up running to completion when
     // the appdomain switches halfway through a step.
     if (patch->pAppDomain != NULL)
     {
+        LOG((LF_CORDB, LL_INFO10000, "DC::MatchPatch: patch has appdomain %p\n",
+            patch->pAppDomain));
         AppDomain *pAppDomainCur = AppDomain::GetCurrentDomain();
 
         if (pAppDomainCur != patch->pAppDomain)
         {
-            LOG((LF_CORDB, LL_INFO10000, "DC::MP: patches didn't match b/c of "
+            LOG((LF_CORDB, LL_INFO10000, "DC::MatchPatch: patches didn't match b/c of "
                 "appdomains!\n"));
             return false;
         }
@@ -2742,14 +2754,15 @@ bool DebuggerController::MatchPatch(Thread *thread,
 
     if (patch->controller->m_thread != NULL && patch->controller->m_thread != thread)
     {
-        LOG((LF_CORDB, LL_INFO10000, "DC::MP: patches didn't match b/c threads\n"));
+        LOG((LF_CORDB, LL_INFO10000, "DC::MatchPatch: patches didn't match b/c threads\n"));
         return false;
     }
 
     if (patch->fp != LEAF_MOST_FRAME)
     {
         // If we specified a Frame-pointer, than it should have been safe to take a stack trace.
-
+        LOG((LF_CORDB, LL_INFO10000, "DC::MatchPatch: patch has fp %p\n",
+            patch->fp.GetSPValue()));
         ControllerStackInfo info;
         StackTraceTicket ticket(patch);
         info.GetStackInfo(ticket, thread, LEAF_MOST_FRAME, context);
@@ -2759,14 +2772,14 @@ bool DebuggerController::MatchPatch(Thread *thread,
 
         if (info.HasReturnFrame() && IsCloserToLeaf(info.GetReturnFrame().fp, patch->fp))
         {
-            LOG((LF_CORDB, LL_INFO10000, "Patch hit but frame not matched at %p (current=%p, patch=%p)\n",
+            LOG((LF_CORDB, LL_INFO10000, "DC::MatchPatch: Patch hit but frame not matched at %p (current=%p, patch=%p)\n",
                 patch->address, info.GetReturnFrame().fp.GetSPValue(), patch->fp.GetSPValue()));
 
             return false;
         }
     }
 
-    LOG((LF_CORDB, LL_INFO100000, "DC::MP: Returning true\n"));
+    LOG((LF_CORDB, LL_INFO10000, "DC::MatchPatch: Returning true\n"));
 
     return true;
 }

@@ -36,12 +36,26 @@ bool InterpreterExecutionControl::ApplyPatch(DebuggerControllerPatch* patch)
     _ASSERTE(!patch->IsActivated());
     _ASSERTE(patch->IsBound());
 
-    LOG((LF_CORDB, LL_INFO10000, "InterpreterEC::ApplyPatch %p at addr %p\n",
+    // Read the current opcode at the bytecode address
+    int32_t currentOpcode = *(int32_t*)patch->address;
+    
+    // Try to get the MethodDesc for this bytecode address
+    MethodDesc* pMD = ExecutionManager::GetCodeMethodDesc((PCODE)patch->address);
+    
+    LOG((LF_CORDB, LL_INFO10000, "InterpreterEC::ApplyPatch %p at bytecode addr %p\n",
         patch, patch->address));
+    LOG((LF_CORDB, LL_INFO10000, "\tCurrent bytecode opcode: 0x%x (decimal: %d)\n",
+        currentOpcode, currentOpcode));
+    if (pMD != NULL)
+    {
+        LOG((LF_CORDB, LL_INFO10000, "\tMethod: %s::%s\n",
+            pMD->GetMethodTable()->GetDebugClassName(),
+            pMD->GetName()));
+    }
 
     patch->SetKind(PATCH_KIND_NATIVE_INTERPRETER);
     // TODO: verify that patch->address is valid interpreter address
-    patch->opcode = CORDbgGetInstruction(patch->address);
+    patch->opcode = currentOpcode;
     *(uint32_t*)patch->address = INTOP_BREAKPOINT;
 
     LOG((LF_CORDB, LL_EVERYTHING, "InterpreterEC::ApplyPatch Breakpoint inserted at %p, saved opcode %x\n",
@@ -56,7 +70,20 @@ bool InterpreterExecutionControl::UnapplyPatch(DebuggerControllerPatch* patch)
     _ASSERTE(patch->address != NULL);
     _ASSERTE(patch->IsActivated());
 
-    LOG((LF_CORDB, LL_INFO1000, "InterpreterEC::UnapplyPatch %p\n", patch));
+    LOG((LF_CORDB, LL_INFO1000, "InterpreterEC::UnapplyPatch %p at bytecode addr %p\n",
+        patch, patch->address));
+    LOG((LF_CORDB, LL_INFO1000, "\tCurrent bytecode opcode: 0x%x (decimal: %d), replacing with original opcode: 0x%x (decimal: %d)\n",
+        *(int32_t*)patch->address,
+        *(int32_t*)patch->address,
+        patch->opcode,
+        patch->opcode));
+    MethodDesc* pMD = ExecutionManager::GetCodeMethodDesc((PCODE)patch->address);
+    if (pMD != NULL)
+    {
+        LOG((LF_CORDB, LL_INFO1000, "\tMethod: %s::%s\n",
+            pMD->GetMethodTable()->GetDebugClassName(),
+            pMD->GetName()));
+    }
 
     // Restore the original opcode
     *(uint32_t*)patch->address = patch->opcode;

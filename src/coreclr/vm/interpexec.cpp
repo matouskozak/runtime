@@ -473,18 +473,49 @@ void* GenericHandleCommon(MethodDesc * pMD, MethodTable * pMT, LPVOID signature)
 }
 
 #if defined(DEBUG) || defined(DEBUGGING_SUPPORTED)
-static void InterpBreakpoint(const int32_t *ip, InterpMethodContextFrame *pFrame, int8_t *stack)
+static void InterpBreakpoint(const int32_t *ip, InterpMethodContextFrame *pFrame, int8_t *stack, DWORD exceptionCode)
 {
     printf("InterpBreakpoint: Hit at bytecode %p\n", ip);
     fflush(stdout);
+    LOG((LF_CORDB, LL_INFO1000, "InterpBreakpoint: Hit at bytecode %p\n", ip));
 
     const ULONG_PTR info[3] = {
         (const ULONG_PTR)ip,        // Bytecode address
         (const ULONG_PTR)pFrame,    // Interpreter frame pointer
         (const ULONG_PTR)stack      // Stack pointer
     };
-    RaiseException(STATUS_BREAKPOINT, 0, 3, info);
+    RaiseException(exceptionCode, 0, 3, info);
 
+    // Thread *pThread = GetThread();
+    // if (pThread != NULL && g_pDebugInterface != NULL)
+    // {
+    //     LOG((LF_CORDB, LL_INFO10000, "InterpBreakpoint: Notifying debugger via FirstChanceNativeException\n"));
+
+    //     EXCEPTION_RECORD exceptionRecord;
+    //     memset(&exceptionRecord, 0, sizeof(EXCEPTION_RECORD));
+    //     exceptionRecord.ExceptionCode = exceptionCode;
+    //     exceptionRecord.ExceptionAddress = (PVOID)ip;
+
+    //     // Construct a CONTEXT for the debugger
+    //     CONTEXT ctx;
+    //     memset(&ctx, 0, sizeof(CONTEXT));
+
+    //     ctx.Sp = (DWORD64)stack;
+    //     ctx.Fp = (DWORD64)pFrame;
+    //     ctx.Pc = (DWORD64)ip;
+
+    //     LOG((LF_CORDB, LL_INFO10000, "InterpBreakpoint: Context prepared, notifying debugger\n"));
+    //     // Notify the debugger of the exception
+    //     bool handled = g_pDebugInterface->FirstChanceNativeException(
+    //         &exceptionRecord,
+    //         &ctx,
+    //         exceptionCode,
+    //         pThread);
+
+    //     LOG((LF_CORDB, LL_INFO10000, "InterpBreakpoint: FirstChanceNativeException returned %d\n", handled));
+    // }
+
+    LOG((LF_CORDB, LL_INFO1000, "InterpBreakpoint: Resumed after breakpoint\n"));
     printf("InterpBreakpoint: Resumed after breakpoint\n");
     fflush(stdout);
 }
@@ -851,6 +882,8 @@ MAIN_LOOP:
 #if defined(DEBUG) || defined(DEBUGGING_SUPPORTED)
                 case INTOP_BREAKPOINT:
                 {
+                    // TODO: Remove exception invocation and call directly
+                    // TODO: Check when we stop on breakpoint, what we're the preceeding opcodes (might help diagnose issues)
                     LOG((LF_CORDB, LL_INFO1000, "\n*** BREAKPOINT HIT at ip=%p, pFrame->ip=%p ***\n", ip, pFrame->ip));
                     LOG((LF_CORDB, LL_INFO1000, "*** Opcodes around breakpoint: [ip-12]=0x%x [ip-8]=0x%x [ip-4]=0x%x [ip]=0x%x ***\n",
                         *(ip-3), *(ip-2), *(ip-1), *ip));
@@ -858,6 +891,8 @@ MAIN_LOOP:
                     pFrame->ip = (int32_t*)ip;
                     // Need to handle the breakpoint exception in its own PAL_TRY block
                     // because we're inside a C++ try block that would catch it first
+                    // InterpBreakpoint(ip, pFrame, stack, STATUS_BREAKPOINT);
+
                     struct BreakpointParam
                     {
                         const int32_t *ip;
@@ -868,7 +903,7 @@ MAIN_LOOP:
 
                     PAL_TRY(BreakpointParam *, pBpParam, &bpParam)
                     {
-                        InterpBreakpoint(pBpParam->ip, pBpParam->pFrame, pBpParam->stack);
+                        InterpBreakpoint(pBpParam->ip, pBpParam->pFrame, pBpParam->stack, STATUS_BREAKPOINT);
                     }
                     PAL_EXCEPT_FILTER(IgnoreCppExceptionFilter)
                     {

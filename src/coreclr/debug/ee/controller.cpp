@@ -1457,7 +1457,7 @@ bool DebuggerController::BindPatch(DebuggerControllerPatch *patch,
     _ASSERTE(g_patches != NULL);
 
     CORDB_ADDRESS_TYPE *addr = (CORDB_ADDRESS_TYPE *)
-                               CodeRegionInfo::GetCodeRegionInfo(info, pMD, startAddr).OffsetToAddress(patch->offset);
+                               CodeRegionInfo::GetCodeRegionInfo(NULL, NULL, startAddr).OffsetToAddress(patch->offset);
     g_patches->BindPatch(patch, addr);
 
     LOG((LF_CORDB, LL_INFO10000, "DC::BP:Binding patch at %p (off:0x%zx)\n", addr, patch->offset));
@@ -3324,6 +3324,7 @@ DPOSS_ACTION DebuggerController::DispatchPatchOrSingleStep(Thread *thread, CONTE
         SENDIPCEVENT_BEGIN(g_pDebugger, thread);
 
         // Now that we've resumed from blocking, check if somebody did a SetIp on us.
+        // bool fIpChanged = (originalAddress != GetIP(context));
         // For interpreter breakpoints, we skip this check because the address parameter (bytecode)
         // and context IP (native) are inherently different.
         bool fIpChanged = !isInterpreterBreakpoint && (originalAddress != GetIP(context));
@@ -3425,8 +3426,15 @@ Exit:
     }
 #endif
 
+
     // originalAddress contains the bytecode IP where the patch is located
-    ActivatePatchSkip(thread, dac_cast<PTR_CBYTE>((CORDB_ADDRESS_TYPE*)originalAddress), FALSE
+    // ActivatePatchSkip(thread, dac_cast<PTR_CBYTE>((CORDB_ADDRESS_TYPE*)originalAddress), FALSE
+    LOG((LF_CORDB, LL_INFO10000,
+        "DC::DPOSS Calling ActivatePatchSkip at PC=0x%p, originalAddress=0x%p\n",
+        dac_cast<PTR_CBYTE>(GetIP(pCtx)), dac_cast<PTR_CBYTE>((CORDB_ADDRESS_TYPE*)originalAddress)));
+    // ActivatePatchSkip(thread, dac_cast<PTR_CBYTE>(GetIP(pCtx)), FALSE
+
+    ActivatePatchSkip(thread, isInterpreterBreakpoint ? dac_cast<PTR_CBYTE>((CORDB_ADDRESS_TYPE*)originalAddress) : dac_cast<PTR_CBYTE>(GetIP(pCtx)), FALSE
 #ifdef OUT_OF_PROCESS_SETTHREADCONTEXT
     , pDebuggerSteppingInfo
 #endif

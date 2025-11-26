@@ -208,8 +208,6 @@ extends:
           helixQueuesTemplate: /eng/pipelines/libraries/helix-queues-setup.yml
           buildConfig: Release
           runtimeFlavor: mono
-          isExtraPlatformsBuild: ${{ parameters.isExtraPlatformsBuild }}
-          isiOSLikeSimulatorOnlyBuild: ${{ parameters.isiOSLikeSimulatorOnlyBuild }}
           platforms:
           - iossimulator_x64
           - tvossimulator_x64

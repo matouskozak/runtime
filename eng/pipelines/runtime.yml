@@ -89,8 +89,8 @@ extends:
               value: $[ stageDependencies.EvaluatePaths.evaluate_paths.outputs['SetPathVars_tools_illink.containsChange'] ]
           jobParameters:
             testGroup: innerloop
-            nameSuffix: AllSubsets_Mono
-            buildArgs: -s mono+libs+libs.tests+host+packs -c $(_BuildConfig) /p:ArchiveTests=true /p:DevTeamProvisioning=- /p:RunAOTCompilation=true /p:RunSmokeTestsOnly=true /p:BuildTestsOnHelix=true /p:EnableAdditionalTimezoneChecks=true /p:UsePortableRuntimePack=false /p:EnableAggressiveTrimming=true
+            nameSuffix: AllSubsets_Mono_OnAzdo
+            buildArgs: -s mono+libs+libs.tests+host+packs -c $(_BuildConfig) /p:ArchiveTests=true /p:DevTeamProvisioning=- /p:RunAOTCompilation=true /p:RunSmokeTestsOnly=true /p:EnableAdditionalTimezoneChecks=true /p:UsePortableRuntimePack=false /p:EnableAggressiveTrimming=true
             timeoutInMinutes: 120
             condition: >-
               or(
@@ -105,7 +105,6 @@ extends:
                 parameters:
                   creator: dotnet-bot
                   testRunNamePrefixSuffix: Mono_$(_BuildConfig)
-                  extraHelixArguments: /p:NeedsToBuildAppsOnHelix=true
                   condition: >-
                     or(
                     eq(variables['librariesContainsChange'], true),
@@ -134,7 +133,7 @@ extends:
               value: $[ stageDependencies.EvaluatePaths.evaluate_paths.outputs['SetPathVars_tools_illink.containsChange'] ]
           jobParameters:
             testGroup: innerloop
-            nameSuffix: AllSubsets_CoreCLR
+            nameSuffix: AllSubsets_CoreCLR_OnAzdo
             buildArgs: -s clr+clr.runtime+libs+packs+libs.tests -c $(_BuildConfig) /p:ArchiveTests=true /p:DevTeamProvisioning=- /p:RunAOTCompilation=false /p:UseMonoRuntime=false /p:MonoForceInterpreter=false /p:BuildTestsOnHelix=false /p:UseNativeAOTRuntime=false /p:RunSmokeTestsOnly=true
             timeoutInMinutes: 120
             condition: >-
@@ -177,7 +176,7 @@ extends:
               value: $[ stageDependencies.EvaluatePaths.evaluate_paths.outputs['SetPathVars_coreclr.containsChange'] ]
           jobParameters:
             testGroup: innerloop
-            nameSuffix: AllSubsets_NativeAOT
+            nameSuffix: AllSubsets_NativeAOT_OnHelix
             buildArgs: --cross -s clr.alljits+clr.tools+clr.nativeaotruntime+clr.nativeaotlibs+libs+libs.tests -c $(_BuildConfig) /p:ArchiveTests=true /p:RunSmokeTestsOnly=true /p:DevTeamProvisioning=- /p:BuildTestsOnHelix=true /p:UseNativeAOTRuntime=true /p:RunAOTCompilation=false /p:ContinuousIntegrationBuild=true
             timeoutInMinutes: 180
             condition: >-
@@ -223,7 +222,7 @@ extends:
               value: $[ stageDependencies.EvaluatePaths.evaluate_paths.outputs['SetPathVars_mono_excluding_wasm.containsChange'] ]
           jobParameters:
             testGroup: innerloop
-            nameSuffix: AllSubsets_Mono
+            nameSuffix: AllSubsets_Mono_OnAzdo
             buildArgs: -s mono+libs+host+packs+libs.tests -c $(_BuildConfig) /p:ArchiveTests=true $(_runSmokeTestsOnlyArg) /p:RunAOTCompilation=true /p:MonoForceInterpreter=true
             timeoutInMinutes: 240
             # extra steps, run tests

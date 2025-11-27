@@ -68,7 +68,7 @@ extends:
 
       #
       # iOS/tvOS devices - Full AOT + AggressiveTrimming to reduce size
-      # Build the whole product using Mono and run libraries tests
+      # Build the whole product using Mono and run libraries tests (Smoke tests only)
       #
       - template: /eng/pipelines/common/platform-matrix.yml
         parameters:
@@ -89,8 +89,8 @@ extends:
               value: $[ stageDependencies.EvaluatePaths.evaluate_paths.outputs['SetPathVars_tools_illink.containsChange'] ]
           jobParameters:
             testGroup: innerloop
-            nameSuffix: AllSubsets_Mono_OnAzdo
-            buildArgs: -s mono+libs+libs.tests+host+packs -c $(_BuildConfig) /p:ArchiveTests=true /p:DevTeamProvisioning=- /p:RunAOTCompilation=true /p:RunSmokeTestsOnly=true /p:EnableAdditionalTimezoneChecks=true /p:UsePortableRuntimePack=false /p:EnableAggressiveTrimming=true
+            nameSuffix: AllSubsets_Mono_Smoke
+            buildArgs: -s mono+libs+libs.tests+host+packs -c $(_BuildConfig) /p:ArchiveTests=true /p:DevTeamProvisioning=- /p:RunAOTCompilation=true /p:RunSmokeTestsOnly=true /p:EnableAdditionalTimezoneChecks=true /p:UsePortableRuntimePack=false /p:EnableAggressiveTrimming=true /p:MonoForceInterpreter=true
             timeoutInMinutes: 120
             condition: >-
               or(
@@ -133,7 +133,7 @@ extends:
               value: $[ stageDependencies.EvaluatePaths.evaluate_paths.outputs['SetPathVars_tools_illink.containsChange'] ]
           jobParameters:
             testGroup: innerloop
-            nameSuffix: AllSubsets_CoreCLR_OnAzdo
+            nameSuffix: AllSubsets_CoreCLR_Smoke
             buildArgs: -s clr+clr.runtime+libs+packs+libs.tests -c $(_BuildConfig) /p:ArchiveTests=true /p:DevTeamProvisioning=- /p:RunAOTCompilation=false /p:UseMonoRuntime=false /p:MonoForceInterpreter=false /p:BuildTestsOnHelix=false /p:UseNativeAOTRuntime=false /p:RunSmokeTestsOnly=true
             timeoutInMinutes: 120
             condition: >-
@@ -157,7 +157,7 @@ extends:
 
       #
       # iOS/tvOS devices
-      # Build the whole product using Native AOT and run libraries tests
+      # Build the whole product using Native AOT and run libraries tests (Smoke tests only)
       #
       - template: /eng/pipelines/common/platform-matrix.yml
         parameters:
@@ -176,7 +176,7 @@ extends:
               value: $[ stageDependencies.EvaluatePaths.evaluate_paths.outputs['SetPathVars_coreclr.containsChange'] ]
           jobParameters:
             testGroup: innerloop
-            nameSuffix: AllSubsets_NativeAOT_OnHelix
+            nameSuffix: AllSubsets_NativeAOT_Smoke
             buildArgs: --cross -s clr.alljits+clr.tools+clr.nativeaotruntime+clr.nativeaotlibs+libs+libs.tests -c $(_BuildConfig) /p:ArchiveTests=true /p:RunSmokeTestsOnly=true /p:DevTeamProvisioning=- /p:BuildTestsOnHelix=true /p:UseNativeAOTRuntime=true /p:RunAOTCompilation=false /p:ContinuousIntegrationBuild=true
             timeoutInMinutes: 180
             condition: >-
@@ -220,8 +220,8 @@ extends:
               value: $[ stageDependencies.EvaluatePaths.evaluate_paths.outputs['SetPathVars_mono_excluding_wasm.containsChange'] ]
           jobParameters:
             testGroup: innerloop
-            nameSuffix: AllSubsets_Mono_OnAzdo
-            buildArgs: -s mono+libs+host+packs+libs.tests -c $(_BuildConfig) /p:ArchiveTests=true $(_runSmokeTestsOnlyArg) /p:RunAOTCompilation=true /p:MonoForceInterpreter=true
+            nameSuffix: AllSubsets_Mono
+            buildArgs: -s mono+libs+host+packs+libs.tests -c $(_BuildConfig) /p:ArchiveTests=true /p:RunSmokeTestsOnly=false /p:RunAOTCompilation=true /p:MonoForceInterpreter=true
             timeoutInMinutes: 240
             # extra steps, run tests
             postBuildSteps:

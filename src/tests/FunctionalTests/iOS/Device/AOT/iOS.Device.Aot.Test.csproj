@@ -5,7 +5,7 @@
     <TargetFramework>$(NetCoreAppCurrent)</TargetFramework>
     <RuntimeIdentifier>$(TargetOS)-$(TargetArchitecture)</RuntimeIdentifier>
     <TargetOS Condition="'$(TargetOS)' == ''">ios</TargetOS>
-    <IncludesTestRunner>false</IncludesTestRunner>
+    <IncludesTestRunner>true</IncludesTestRunner>
     <ExpectedExitCode>42</ExpectedExitCode>
     <SelfContained>true</SelfContained>
     <UseConsoleUITemplate>true</UseConsoleUITemplate>

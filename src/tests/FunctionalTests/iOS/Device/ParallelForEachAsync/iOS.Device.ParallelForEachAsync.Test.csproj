@@ -5,7 +5,7 @@
     <TargetFramework>$(NetCoreAppCurrent)</TargetFramework>
     <TargetOS Condition="'$(TargetOS)' == ''">ios</TargetOS>
     <TargetArchitecture Condition="'$(TargetArchitecture)' == ''">arm64</TargetArchitecture>
-    <IncludesTestRunner>false</IncludesTestRunner>
+    <IncludesTestRunner>true</IncludesTestRunner>
     <ExpectedExitCode>42</ExpectedExitCode>
     <UseConsoleUITemplate>true</UseConsoleUITemplate>
   </PropertyGroup>

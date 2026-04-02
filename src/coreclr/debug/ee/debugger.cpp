@@ -28,6 +28,10 @@
 #include "dbgtransportsession.h"
 #endif // FEATURE_DBGIPC_TRANSPORT_VM
 
+#ifdef FEATURE_INTERPRETER
+#include "../../vm/interpexec.h"
+#endif // FEATURE_INTERPRETER
+
 #ifdef TEST_DATA_CONSISTENCY
 #include "datatest.h"
 #endif // TEST_DATA_CONSISTENCY
@@ -9848,6 +9852,39 @@ void Debugger::UnloadClass(mdTypeDef classMetadataToken,
 
 }
 
+#ifdef FEATURE_INTERPRETER
+/******************************************************************************
+ * Execute any pending func evals queued on the interpreter thread context.
+ * Called from the interpreter's INTOP_BREAKPOINT handler after the debugger
+ * callback returns. This keeps FuncEvalHijackWorker/DebuggerEval out of the
+ * interpreter execution loop.
+ ******************************************************************************/
+void Debugger::ExecutePendingInterpreterFuncEval(Thread* pThread)
+{
+    CONTRACTL
+    {
+        THROWS;
+        GC_TRIGGERS;
+        MODE_COOPERATIVE;
+    }
+    CONTRACTL_END;
+
+    InterpThreadContext* pInterpCtx = pThread->GetInterpThreadContext();
+    if (pInterpCtx == NULL)
+        return;
+
+    while (pInterpCtx->m_pPendingFuncEval != NULL)
+    {
+        DebuggerEval* pDE = (DebuggerEval*)pInterpCtx->m_pPendingFuncEval;
+        pInterpCtx->m_pPendingFuncEval = NULL;
+
+        LOG((LF_CORDB, LL_INFO1000, "D::EPIFE: Executing pending func eval pDE=%p on thread %p\n", pDE, pThread));
+        ::FuncEvalHijackWorker(pDE);
+        LOG((LF_CORDB, LL_INFO1000, "D::EPIFE: Func eval completed for pDE=%p\n", pDE));
+    }
+}
+#endif // FEATURE_INTERPRETER
+
 /******************************************************************************
  *
  ******************************************************************************/
@@ -14334,11 +14371,25 @@ HRESULT Debugger::FuncEvalSetup(DebuggerIPCE_FuncEvalInfo *pEvalInfo,
         return CORDBG_E_ILLEGAL_AT_GC_UNSAFE_POINT;
     }
 
-    if (filterContext != NULL && ::GetSP(filterContext) != ALIGN_DOWN(::GetSP(filterContext), STACK_ALIGN_SIZE))
+#ifdef FEATURE_INTERPRETER
+    // For interpreter threads, the filter context contains synthetic values (IP = bytecode address,
+    // SP = InterpMethodContextFrame*, FP = stack pointer) — not real native register values.
+    // Skip the SP alignment check since it only applies to native stack pointers.
+    bool fIsInterpreterThread = false;
+    if (filterContext != NULL)
     {
-        // SP is not aligned, we cannot do a FuncEval here
-        LOG((LF_CORDB, LL_INFO1000, "D::FES SP is unaligned"));
-        return CORDBG_E_FUNC_EVAL_BAD_START_POINT;
+        EECodeInfo codeInfo((PCODE)GetIP(filterContext));
+        fIsInterpreterThread = codeInfo.IsInterpretedCode();
+    }
+    if (!fIsInterpreterThread)
+#endif // FEATURE_INTERPRETER
+    {
+        if (filterContext != NULL && ::GetSP(filterContext) != ALIGN_DOWN(::GetSP(filterContext), STACK_ALIGN_SIZE))
+        {
+            // SP is not aligned, we cannot do a FuncEval here
+            LOG((LF_CORDB, LL_INFO1000, "D::FES SP is unaligned"));
+            return CORDBG_E_FUNC_EVAL_BAD_START_POINT;
+        }
     }
 
     // Allocate the breakpoint instruction info for the debugger info in executable memory.
@@ -14401,40 +14452,63 @@ HRESULT Debugger::FuncEvalSetup(DebuggerIPCE_FuncEvalInfo *pEvalInfo,
     {
         _ASSERTE(filterContext != NULL);
 
-        ::SetIP(filterContext, (UINT_PTR)GetEEFuncEntryPoint(::FuncEvalHijack));
+#ifdef FEATURE_INTERPRETER
+        // For interpreter threads, we cannot hijack the native CPU context because the interpreter
+        // manages execution through its own bytecode dispatch loop. Instead, we store the DebuggerEval
+        // on the interpreter's thread context. The INTOP_BREAKPOINT handler will pick it up after
+        // the debugger callback returns.
+        if (fIsInterpreterThread)
+        {
+            InterpThreadContext* pInterpCtx = pThread->GetInterpThreadContext();
+            _ASSERTE(pInterpCtx != NULL);
 
-        // Don't be fooled into thinking you can push things onto the thread's stack now. If the thread is stopped at a
-        // breakpoint or from a single step, then its really suspended in the SEH filter. ESP in the thread's CONTEXT,
-        // therefore, points into the middle of the thread's current stack. So we pass things we need in the hijack in
-        // the thread's registers.
+            pDE->m_evalDuringException = true;
+            _ASSERTE(pInterpCtx->m_pPendingFuncEval == NULL);
+            pInterpCtx->m_pPendingFuncEval = pDE;
 
-        // Set the first argument to point to the DebuggerEval.
+            LOG((LF_CORDB, LL_INFO1000, "D::FES: Interpreter func eval setup for pDE:%p on thread %p\n", pDE, pThread));
+
+            // No context modification needed — interpreter checks the pending flag on resume.
+            // No IncThreadsAtUnsafePlaces — stack remains walkable (no context change).
+        }
+        else
+#endif // FEATURE_INTERPRETER
+        {
+            ::SetIP(filterContext, (UINT_PTR)GetEEFuncEntryPoint(::FuncEvalHijack));
+
+            // Don't be fooled into thinking you can push things onto the thread's stack now. If the thread is stopped at a
+            // breakpoint or from a single step, then its really suspended in the SEH filter. ESP in the thread's CONTEXT,
+            // therefore, points into the middle of the thread's current stack. So we pass things we need in the hijack in
+            // the thread's registers.
+
+            // Set the first argument to point to the DebuggerEval.
 #if defined(TARGET_X86)
-        filterContext->Eax = (DWORD)pDE;
+            filterContext->Eax = (DWORD)pDE;
 #elif defined(TARGET_AMD64)
 #ifdef UNIX_AMD64_ABI
-        filterContext->Rdi = (SIZE_T)pDE;
+            filterContext->Rdi = (SIZE_T)pDE;
 #else // UNIX_AMD64_ABI
-        filterContext->Rcx = (SIZE_T)pDE;
+            filterContext->Rcx = (SIZE_T)pDE;
 #endif // !UNIX_AMD64_ABI
 #elif defined(TARGET_ARM)
-        filterContext->R0 = (DWORD)pDE;
+            filterContext->R0 = (DWORD)pDE;
 #elif defined(TARGET_ARM64)
-        filterContext->X0 = (SIZE_T)pDE;
+            filterContext->X0 = (SIZE_T)pDE;
 #elif defined(TARGET_RISCV64)
-        filterContext->A0 = (SIZE_T)pDE;
+            filterContext->A0 = (SIZE_T)pDE;
 #elif defined(TARGET_LOONGARCH64)
-        filterContext->A0 = (SIZE_T)pDE;
+            filterContext->A0 = (SIZE_T)pDE;
 #else
-        PORTABILITY_ASSERT("Debugger::FuncEvalSetup is not implemented on this platform.");
+            PORTABILITY_ASSERT("Debugger::FuncEvalSetup is not implemented on this platform.");
 #endif
 
-        //
-        // To prevent GCs until the func-eval gets a chance to run, we increment the counter here.
-        // We only need to do this if we have changed the filter CONTEXT, since the stack will be unwalkable
-        // in this case.
-        //
-        g_pDebugger->IncThreadsAtUnsafePlaces();
+            //
+            // To prevent GCs until the func-eval gets a chance to run, we increment the counter here.
+            // We only need to do this if we have changed the filter CONTEXT, since the stack will be unwalkable
+            // in this case.
+            //
+            g_pDebugger->IncThreadsAtUnsafePlaces();
+        }
     }
     else
     {
@@ -16131,7 +16205,8 @@ void FuncEvalFrame::UpdateRegDisplay_Impl(const PREGDISPLAY pRD, bool updateFloa
     SUPPORTS_DAC;
     DebuggerEval * pDE = GetDebuggerEval();
 
-    // No context to update if we're doing a func eval from within exception processing.
+    // No context to update if we're doing a func eval from within exception processing
+    // or from interpreter code (both use m_evalDuringException to share the direct-send path).
     if (pDE->m_evalDuringException)
     {
         return;

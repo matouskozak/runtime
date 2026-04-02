@@ -639,6 +639,7 @@ InterpThreadContext::InterpThreadContext()
 #ifdef DEBUGGING_SUPPORTED
     m_bypassAddress = NULL;
     m_bypassOpcode = 0;
+    m_pPendingFuncEval = NULL;
 #endif // DEBUGGING_SUPPORTED
 }
 
@@ -1258,6 +1259,13 @@ SWITCH_OPCODE:
                 {
                     LOG((LF_CORDB, LL_INFO10000, "InterpExecMethod: Hit breakpoint at IP %p\n", ip));
                     InterpBreakpoint(ip, pFrame, stack, pInterpreterFrame);
+
+                    // Execute any pending func evals queued by the debugger's FuncEvalSetup.
+                    if (pThreadContext->m_pPendingFuncEval != NULL && g_pDebugInterface != NULL)
+                    {
+                        Thread *pThread = GetThread();
+                        g_pDebugInterface->ExecutePendingInterpreterFuncEval(pThread);
+                    }
 
                     int32_t bypassOpcode = 0;
                     

@@ -2575,6 +2575,11 @@ public:
 #ifndef DACCESS_COMPILE
     void MulticastTraceNextStep(DELEGATEREF pbDel, INT32 count);
     void ExternalMethodFixupNextStep(PCODE address);
+
+#ifdef FEATURE_INTERPRETER
+    void ExecutePendingInterpreterFuncEval(Thread* pThread);
+#endif // FEATURE_INTERPRETER
+
 #endif
 
 #ifdef DACCESS_COMPILE

@@ -1261,10 +1261,34 @@ SWITCH_OPCODE:
                     InterpBreakpoint(ip, pFrame, stack, pInterpreterFrame);
 
                     // Execute any pending func evals queued by the debugger's FuncEvalSetup.
+                    // DispatchNativeException clears the filter context before returning, but
+                    // FuncEvalHijackWorker needs it to identify the thread as stopped in managed
+                    // code and at a GC-safe point. Set a synthetic filter context here so that
+                    // nested/subsequent func evals can pass the safety checks in FuncEvalSetup.
                     if (pThreadContext->m_pPendingFuncEval != NULL && g_pDebugInterface != NULL)
                     {
                         Thread *pThread = GetThread();
-                        g_pDebugInterface->ExecutePendingInterpreterFuncEval(pThread);
+
+                        CONTEXT funcEvalCtx;
+                        memset(&funcEvalCtx, 0, sizeof(CONTEXT));
+                        funcEvalCtx.ContextFlags = CONTEXT_FULL;
+                        SetSP(&funcEvalCtx, (DWORD64)pFrame);
+                        SetFP(&funcEvalCtx, (DWORD64)stack);
+                        SetIP(&funcEvalCtx, (DWORD64)ip);
+                        SetFirstArgReg(&funcEvalCtx, dac_cast<TADDR>(pInterpreterFrame));
+
+                        pThread->SetFilterContext(&funcEvalCtx);
+                        EX_TRY
+                        {
+                            g_pDebugInterface->ExecutePendingInterpreterFuncEval(pThread);
+                        }
+                        EX_CATCH
+                        {
+                            pThread->SetFilterContext(NULL);
+                            EX_RETHROW;
+                        }
+                        EX_END_CATCH
+                        pThread->SetFilterContext(NULL);
                     }
 
                     int32_t bypassOpcode = 0;

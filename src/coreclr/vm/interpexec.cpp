@@ -1260,7 +1260,7 @@ SWITCH_OPCODE:
                     LOG((LF_CORDB, LL_INFO10000, "InterpExecMethod: Hit breakpoint at IP %p\n", ip));
                     InterpBreakpoint(ip, pFrame, stack, pInterpreterFrame);
 
-                    // Execute any pending func evals queued by the debugger's FuncEvalSetup.
+                    // Execute the pending func eval set by the debugger's FuncEvalSetup, if any.
                     // DispatchNativeException clears the filter context before returning, but
                     // FuncEvalHijackWorker needs it to identify the thread as stopped in managed
                     // code and at a GC-safe point. Set a synthetic filter context here so that

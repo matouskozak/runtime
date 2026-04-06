@@ -9869,7 +9869,7 @@ void Debugger::UnloadClass(mdTypeDef classMetadataToken,
 
 #ifdef FEATURE_INTERPRETER
 /******************************************************************************
- * Execute any pending func evals queued on the interpreter thread context.
+ * Execute the pending func eval on the interpreter thread context, if any.
  * Called from the interpreter's INTOP_BREAKPOINT handler after the debugger
  * callback returns. This keeps FuncEvalHijackWorker/DebuggerEval out of the
  * interpreter execution loop.
@@ -9888,7 +9888,7 @@ void Debugger::ExecutePendingInterpreterFuncEval(Thread* pThread)
     if (pInterpCtx == NULL)
         return;
 
-    while (pInterpCtx->m_pPendingFuncEval != NULL)
+    if (pInterpCtx->m_pPendingFuncEval != NULL)
     {
         DebuggerEval* pDE = (DebuggerEval*)pInterpCtx->m_pPendingFuncEval;
         pInterpCtx->m_pPendingFuncEval = NULL;

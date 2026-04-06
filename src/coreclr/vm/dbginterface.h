@@ -394,7 +394,7 @@ public:
     virtual void ExternalMethodFixupNextStep(PCODE address) = 0;
 
 #ifdef FEATURE_INTERPRETER
-    // Execute any pending func evals queued on the interpreter thread context.
+    // Execute the pending func eval on the interpreter thread context, if any.
     // Called from the interpreter's INTOP_BREAKPOINT handler after the debugger callback returns.
     virtual void ExecutePendingInterpreterFuncEval(Thread* pThread) = 0;
 #endif // FEATURE_INTERPRETER

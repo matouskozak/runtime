@@ -1326,22 +1326,37 @@ DebuggerEval::DebuggerEval(CONTEXT * pContext, DebuggerIPCE_FuncEvalInfo * pEval
 {
     WRAPPER_NO_CONTRACT;
 
+    // bpInfoSegmentRX is NULL only for interpreter func evals — the interpreter signals completion
+    // directly via FuncEvalComplete, not the native breakpoint trap mechanism.
+#ifdef FEATURE_INTERPRETER
+    _ASSERTE(bpInfoSegmentRX != NULL || (pContext != NULL && EECodeInfo((PCODE)GetIP(pContext)).IsInterpretedCode()));
+#else
+    _ASSERTE(bpInfoSegmentRX != NULL);
+#endif
+    if (bpInfoSegmentRX != NULL)
+    {
 #if !defined(DBI_COMPILE) && !defined(DACCESS_COMPILE) && defined(HOST_OSX) && defined(HOST_ARM64)
-    ExecutableWriterHolder<DebuggerEvalBreakpointInfoSegment> bpInfoSegmentWriterHolder(bpInfoSegmentRX, sizeof(DebuggerEvalBreakpointInfoSegment));
-    DebuggerEvalBreakpointInfoSegment *bpInfoSegmentRW = bpInfoSegmentWriterHolder.GetRW();
+        ExecutableWriterHolder<DebuggerEvalBreakpointInfoSegment> bpInfoSegmentWriterHolder(bpInfoSegmentRX, sizeof(DebuggerEvalBreakpointInfoSegment));
+        DebuggerEvalBreakpointInfoSegment *bpInfoSegmentRW = bpInfoSegmentWriterHolder.GetRW();
 #else // !DBI_COMPILE && !DACCESS_COMPILE && HOST_OSX && HOST_ARM64
-    DebuggerEvalBreakpointInfoSegment *bpInfoSegmentRW = bpInfoSegmentRX;
+        DebuggerEvalBreakpointInfoSegment *bpInfoSegmentRW = bpInfoSegmentRX;
 #endif // !DBI_COMPILE && !DACCESS_COMPILE && HOST_OSX && HOST_ARM64
-    new (bpInfoSegmentRW) DebuggerEvalBreakpointInfoSegment(this);
-    m_bpInfoSegment = bpInfoSegmentRX;
+        new (bpInfoSegmentRW) DebuggerEvalBreakpointInfoSegment(this);
+        m_bpInfoSegment = bpInfoSegmentRX;
 
-    // This must be non-zero so that the saved opcode is non-zero, and on IA64 we want it to be 0x16
-    // so that we can have a breakpoint instruction in any slot in the bundle.
-    bpInfoSegmentRW->m_breakpointInstruction[0] = 0x16;
+        // This must be non-zero so that the saved opcode is non-zero, and on IA64 we want it to be 0x16
+        // so that we can have a breakpoint instruction in any slot in the bundle.
+        bpInfoSegmentRW->m_breakpointInstruction[0] = 0x16;
 #if defined(TARGET_ARM)
-    USHORT *bp = (USHORT*)&m_bpInfoSegment->m_breakpointInstruction;
-    *bp = CORDbg_BREAK_INSTRUCTION;
+        USHORT *bp = (USHORT*)&m_bpInfoSegment->m_breakpointInstruction;
+        *bp = CORDbg_BREAK_INSTRUCTION;
 #endif // TARGET_ARM
+    }
+    else
+    {
+        m_bpInfoSegment = NULL;
+    }
+
     m_thread = pEvalInfo->vmThreadToken.GetRawPtr();
     m_evalType = pEvalInfo->funcEvalType;
     m_methodToken = pEvalInfo->funcMetadataToken;
@@ -14393,16 +14408,25 @@ HRESULT Debugger::FuncEvalSetup(DebuggerIPCE_FuncEvalInfo *pEvalInfo,
     }
 
     // Allocate the breakpoint instruction info for the debugger info in executable memory.
-    DebuggerHeap *pHeap = g_pDebugger->GetInteropSafeExecutableHeap_NoThrow();
-    if (pHeap == NULL)
+    // Interpreter func evals don't need this — completion is signaled directly via
+    // FuncEvalComplete, not a native breakpoint trap. Skip the allocation to avoid
+    // requiring executable memory on platforms where it's unavailable (e.g. iOS).
+    DebuggerEvalBreakpointInfoSegment *bpInfoSegmentRX = NULL;
+#ifdef FEATURE_INTERPRETER
+    if (!fIsInterpreterThread)
+#endif // FEATURE_INTERPRETER
     {
-        return E_OUTOFMEMORY;
-    }
+        DebuggerHeap *pHeap = g_pDebugger->GetInteropSafeExecutableHeap_NoThrow();
+        if (pHeap == NULL)
+        {
+            return E_OUTOFMEMORY;
+        }
 
-    DebuggerEvalBreakpointInfoSegment *bpInfoSegmentRX = (DebuggerEvalBreakpointInfoSegment*)pHeap->Alloc(sizeof(DebuggerEvalBreakpointInfoSegment));
-    if (bpInfoSegmentRX == NULL)
-    {
-        return E_OUTOFMEMORY;
+        bpInfoSegmentRX = (DebuggerEvalBreakpointInfoSegment*)pHeap->Alloc(sizeof(DebuggerEvalBreakpointInfoSegment));
+        if (bpInfoSegmentRX == NULL)
+        {
+            return E_OUTOFMEMORY;
+        }
     }
 
     // Create a DebuggerEval to hold info about this eval while its in progress. Constructor copies the thread's
@@ -14413,7 +14437,13 @@ HRESULT Debugger::FuncEvalSetup(DebuggerIPCE_FuncEvalInfo *pEvalInfo,
     {
         return E_OUTOFMEMORY;
     }
+#ifdef FEATURE_INTERPRETER
+    // Interpreter func evals skip bpInfoSegment — completion is signaled directly
+    // via FuncEvalComplete, not the native breakpoint trap. Only call Init() for JIT func evals.
+    else if (!fIsInterpreterThread && !pDE->Init())
+#else
     else if (!pDE->Init())
+#endif
     {
         // We fail to change the m_breakpointInstruction field to PAGE_EXECUTE_READWRITE permission.
         return E_FAIL;

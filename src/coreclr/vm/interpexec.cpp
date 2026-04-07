@@ -703,6 +703,27 @@ static void InterpBreakpoint(const int32_t *ip, const InterpMethodContextFrame *
             &ctx,
             STATUS_BREAKPOINT,
             pThread);
+
+        // Execute the pending func eval set by the debugger's FuncEvalSetup, if any.
+        // DispatchNativeException clears the filter context before returning.
+        // Re-set it as filter context so FuncEvalHijackWorker can pass the managed-code / GC-safe-point checks.
+        // This expects that the ctx was not modified by the debugger.
+        InterpThreadContext *pThreadContext = pThread->GetInterpThreadContext();
+        while (pThreadContext != NULL && pThreadContext->m_pPendingFuncEval != NULL)
+        {
+            pThread->SetFilterContext(&ctx);
+            EX_TRY
+            {
+                g_pDebugInterface->ExecutePendingInterpreterFuncEval(pThread);
+            }
+            EX_CATCH
+            {
+                pThread->SetFilterContext(NULL);
+                EX_RETHROW;
+            }
+            EX_END_CATCH
+            pThread->SetFilterContext(NULL);
+        }
     }
 }
 #endif // DEBUGGING_SUPPORTED
@@ -1259,37 +1280,6 @@ SWITCH_OPCODE:
                 {
                     LOG((LF_CORDB, LL_INFO10000, "InterpExecMethod: Hit breakpoint at IP %p\n", ip));
                     InterpBreakpoint(ip, pFrame, stack, pInterpreterFrame);
-
-                    // Execute the pending func eval set by the debugger's FuncEvalSetup, if any.
-                    // DispatchNativeException clears the filter context before returning, but
-                    // FuncEvalHijackWorker needs it to identify the thread as stopped in managed
-                    // code and at a GC-safe point. Set a synthetic filter context here so that
-                    // nested/subsequent func evals can pass the safety checks in FuncEvalSetup.
-                    if (pThreadContext->m_pPendingFuncEval != NULL && g_pDebugInterface != NULL)
-                    {
-                        Thread *pThread = GetThread();
-
-                        CONTEXT funcEvalCtx;
-                        memset(&funcEvalCtx, 0, sizeof(CONTEXT));
-                        funcEvalCtx.ContextFlags = CONTEXT_FULL;
-                        SetSP(&funcEvalCtx, (DWORD64)pFrame);
-                        SetFP(&funcEvalCtx, (DWORD64)stack);
-                        SetIP(&funcEvalCtx, (DWORD64)ip);
-                        SetFirstArgReg(&funcEvalCtx, dac_cast<TADDR>(pInterpreterFrame));
-
-                        pThread->SetFilterContext(&funcEvalCtx);
-                        EX_TRY
-                        {
-                            g_pDebugInterface->ExecutePendingInterpreterFuncEval(pThread);
-                        }
-                        EX_CATCH
-                        {
-                            pThread->SetFilterContext(NULL);
-                            EX_RETHROW;
-                        }
-                        EX_END_CATCH
-                        pThread->SetFilterContext(NULL);
-                    }
 
                     int32_t bypassOpcode = 0;
                     

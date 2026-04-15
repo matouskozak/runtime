@@ -1382,7 +1382,7 @@ DebuggerEval::DebuggerEval(CONTEXT * pContext, DebuggerIPCE_FuncEvalInfo * pEval
     m_aborting = FE_ABORT_NONE;
     m_aborted = false;
     m_completed = false;
-    m_evalDuringException = fInException;
+    m_evalUsesHijack = !fInException;
     m_retValueBoxing = Debugger::NoValueTypeBoxing;
     m_vmObjectHandle = VMPTR_OBJECTHANDLE::NullPtr();
 
@@ -7709,7 +7709,7 @@ void Debugger::ProcessAnyPendingEvals(Thread *pThread)
     {
         DebuggerEval *pDE = pfe->pDE;
 
-        _ASSERTE(pDE->m_evalDuringException);
+        _ASSERTE(!pDE->m_evalUsesHijack);
         _ASSERTE(pDE->m_thread == GetThreadNULLOk());
 
         // Remove the pending eval from the hash. This ensures that if we take a first chance exception during the eval
@@ -9870,10 +9870,10 @@ void Debugger::UnloadClass(mdTypeDef classMetadataToken,
 
 #ifdef FEATURE_INTERPRETER
 /******************************************************************************
- * Execute the pending func eval on the interpreter thread context, if any.
- * Called from the interpreter's INTOP_BREAKPOINT handler after the debugger
- * callback returns. This keeps FuncEvalHijackWorker/DebuggerEval out of the
- * interpreter execution loop.
+ * Execute pending func evals on the interpreter thread. Called from the
+ * interpreter's INTOP_BREAKPOINT handler after the debugger callback returns.
+ * Routes through ProcessAnyPendingEvals to share the dispatch logic with the
+ * exception-time func-eval path.
  ******************************************************************************/
 void Debugger::ExecutePendingInterpreterFuncEval(Thread* pThread)
 {
@@ -9885,19 +9885,7 @@ void Debugger::ExecutePendingInterpreterFuncEval(Thread* pThread)
     }
     CONTRACTL_END;
 
-    InterpThreadContext* pInterpCtx = pThread->GetInterpThreadContext();
-    if (pInterpCtx == NULL)
-        return;
-
-    if (pInterpCtx->m_pPendingFuncEval != NULL)
-    {
-        DebuggerEval* pDE = (DebuggerEval*)pInterpCtx->m_pPendingFuncEval;
-        pInterpCtx->m_pPendingFuncEval = NULL;
-
-        LOG((LF_CORDB, LL_INFO1000, "D::EPIFE: Executing pending func eval pDE=%p on thread %p\n", pDE, pThread));
-        ::FuncEvalHijackWorker(pDE);
-        LOG((LF_CORDB, LL_INFO1000, "D::EPIFE: Func eval completed for pDE=%p\n", pDE));
-    }
+    ProcessAnyPendingEvals(pThread);
 }
 #endif // FEATURE_INTERPRETER
 
@@ -14397,6 +14385,13 @@ HRESULT Debugger::FuncEvalSetup(DebuggerIPCE_FuncEvalInfo *pEvalInfo,
         EECodeInfo codeInfo((PCODE)GetIP(filterContext));
         fIsInterpreterThread = codeInfo.IsInterpretedCode();
     }
+    else if (!fInException && pThread->GetInterpThreadContext() != NULL)
+    {
+        // The thread is an interpreter thread but not at a breakpoint (no filter context).
+        // Non-exception evals on interpreter threads require a breakpoint stop.
+        LOG((LF_CORDB, LL_INFO1000, "D::FES: Func eval requested on non-breakpoint interpreter thread\n"));
+        return CORDBG_E_FUNC_EVAL_BAD_START_POINT;
+    }
     if (!fIsInterpreterThread)
 #endif // FEATURE_INTERPRETER
     {
@@ -14438,13 +14433,7 @@ HRESULT Debugger::FuncEvalSetup(DebuggerIPCE_FuncEvalInfo *pEvalInfo,
     {
         return E_OUTOFMEMORY;
     }
-#ifdef FEATURE_INTERPRETER
-    // Interpreter func evals skip bpInfoSegment — completion is signaled directly
-    // via FuncEvalComplete, not the native breakpoint trap. Only call Init() for JIT func evals.
-    else if (!fIsInterpreterThread && !pDE->Init())
-#else
     else if (!pDE->Init())
-#endif
     {
         // We fail to change the m_breakpointInstruction field to PAGE_EXECUTE_READWRITE permission.
         return E_FAIL;
@@ -14485,21 +14474,24 @@ HRESULT Debugger::FuncEvalSetup(DebuggerIPCE_FuncEvalInfo *pEvalInfo,
 
 #ifdef FEATURE_INTERPRETER
         // For interpreter threads, we cannot hijack the native CPU context because the interpreter
-        // manages execution through its own bytecode dispatch loop. Instead, we store the DebuggerEval
-        // on the interpreter's thread context. The INTOP_BREAKPOINT handler will pick it up after
-        // the debugger callback returns.
+        // manages execution through its own bytecode dispatch loop. Instead, we queue the DebuggerEval
+        // in the pending evals table. The INTOP_BREAKPOINT handler will call ProcessAnyPendingEvals
+        // after the debugger callback returns.
         if (fIsInterpreterThread)
         {
-            InterpThreadContext* pInterpCtx = pThread->GetInterpThreadContext();
-            _ASSERTE(pInterpCtx != NULL);
+            pDE->m_evalUsesHijack = false;
 
-            pDE->m_evalDuringException = true;
-            _ASSERTE(pInterpCtx->m_pPendingFuncEval == NULL);
-            pInterpCtx->m_pPendingFuncEval = pDE;
+            HRESULT hr = CheckInitPendingFuncEvalTable();
+            if (FAILED(hr))
+            {
+                DeleteInteropSafeExecutable(pDE);
+                return hr;
+            }
+            GetPendingEvals()->AddPendingEval(pDE->m_thread, pDE);
 
             LOG((LF_CORDB, LL_INFO1000, "D::FES: Interpreter func eval setup for pDE:%p on thread %p\n", pDE, pThread));
 
-            // No context modification needed — interpreter checks the pending flag on resume.
+            // No context modification needed — interpreter checks pending evals on resume.
             // No IncThreadsAtUnsafePlaces — stack remains walkable (no context change).
         }
         else
@@ -16204,7 +16196,7 @@ unsigned FuncEvalFrame::GetFrameAttribs_Impl(void)
 {
     LIMITED_METHOD_DAC_CONTRACT;
 
-    if (GetDebuggerEval()->m_evalDuringException)
+    if (!GetDebuggerEval()->m_evalUsesHijack)
     {
         return FRAME_ATTR_NONE;
     }
@@ -16218,7 +16210,7 @@ TADDR FuncEvalFrame::GetReturnAddressPtr_Impl()
 {
     LIMITED_METHOD_DAC_CONTRACT;
 
-    if (GetDebuggerEval()->m_evalDuringException)
+    if (!GetDebuggerEval()->m_evalUsesHijack)
     {
         return (TADDR)NULL;
     }
@@ -16237,8 +16229,8 @@ void FuncEvalFrame::UpdateRegDisplay_Impl(const PREGDISPLAY pRD, bool updateFloa
     DebuggerEval * pDE = GetDebuggerEval();
 
     // No context to update if we're doing a func eval from within exception processing
-    // or from interpreter code (both use m_evalDuringException to share the direct-send path).
-    if (pDE->m_evalDuringException)
+    // or from interpreter code (both skip the hijack path).
+    if (!pDE->m_evalUsesHijack)
     {
         return;
     }

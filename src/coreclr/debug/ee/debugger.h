@@ -3487,7 +3487,7 @@ public:
     FUNC_EVAL_ABORT_TYPE               m_aborting;          // Has an abort been requested, and what type.
     bool                               m_aborted;           // Was this eval aborted
     bool                               m_completed;          // Is the eval complete - successfully or by aborting
-    bool                               m_evalDuringException;
+    bool                               m_evalUsesHijack;
     VMPTR_OBJECTHANDLE                 m_vmObjectHandle;
     TypeHandle                         m_ownerTypeHandle;
     DebuggerEvalBreakpointInfoSegment* m_bpInfoSegment;
@@ -3496,6 +3496,10 @@ public:
 
     bool Init()
     {
+        // Interpreter func evals and exception-time evals don't use the breakpoint instruction segment, so skip the executability check.
+        if (!m_evalUsesHijack)
+            return true;
+
         _ASSERTE(DbgIsExecutable(&m_bpInfoSegment->m_breakpointInstruction, sizeof(m_bpInfoSegment->m_breakpointInstruction)));
         return true;
     }

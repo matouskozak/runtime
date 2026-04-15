@@ -69,12 +69,6 @@ struct InterpThreadContext
     const int32_t *m_bypassAddress;   // Address of breakpoint to bypass (NULL = no bypass)
     int32_t        m_bypassOpcode;    // Original opcode to execute instead of INTOP_BREAKPOINT
 
-    // Pending func eval. When the debugger requests a function evaluation on a thread
-    // stopped in interpreter code, FuncEvalSetup stores the DebuggerEval* here instead
-    // of hijacking the native CPU context (which doesn't work for interpreter threads).
-    // The INTOP_BREAKPOINT handler checks this after the debugger callback returns.
-    void           *m_pPendingFuncEval; // DebuggerEval* (void* to avoid header dependency)
-
     void SetBypass(const int32_t* address, int32_t opcode)
     {
         _ASSERTE(m_bypassAddress == NULL);

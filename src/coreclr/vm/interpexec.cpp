@@ -639,7 +639,6 @@ InterpThreadContext::InterpThreadContext()
 #ifdef DEBUGGING_SUPPORTED
     m_bypassAddress = NULL;
     m_bypassOpcode = 0;
-    m_pPendingFuncEval = NULL;
 #endif // DEBUGGING_SUPPORTED
 }
 
@@ -671,7 +670,7 @@ static void InterpHalt()
 #endif // DEBUG
 
 #ifdef DEBUGGING_SUPPORTED
-static void InterpBreakpoint(const int32_t *ip, const InterpMethodContextFrame *pFrame, const int8_t *stack, InterpreterFrame *pInterpreterFrame)
+static const int32_t* InterpBreakpoint(const int32_t *ip, const InterpMethodContextFrame *pFrame, const int8_t *stack, InterpreterFrame *pInterpreterFrame)
 {
     Thread *pThread = GetThread();
     if (pThread != NULL && g_pDebugInterface != NULL)
@@ -704,27 +703,40 @@ static void InterpBreakpoint(const int32_t *ip, const InterpMethodContextFrame *
             STATUS_BREAKPOINT,
             pThread);
 
-        // Execute the pending func eval set by the debugger's FuncEvalSetup, if any.
+        // Execute pending func evals set by the debugger's FuncEvalSetup, if any.
         // DispatchNativeException clears the filter context before returning.
         // Re-set it as filter context so FuncEvalHijackWorker can pass the managed-code / GC-safe-point checks.
-        // This expects that the ctx was not modified by the debugger.
         InterpThreadContext *pThreadContext = pThread->GetInterpThreadContext();
-        while (pThreadContext != NULL && pThreadContext->m_pPendingFuncEval != NULL)
+
+        // Save and restore bypass state around func eval execution.
+        // Func eval triggers its own INTOP_BREAKPOINT callbacks which would
+        // overwrite the bypass that was set for the original breakpoint.
+        const int32_t *savedBypassAddress = pThreadContext->m_bypassAddress;
+        int32_t savedBypassOpcode = pThreadContext->m_bypassOpcode;
+
+        pThread->SetFilterContext(&ctx);
+        EX_TRY
         {
-            pThread->SetFilterContext(&ctx);
-            EX_TRY
-            {
-                g_pDebugInterface->ExecutePendingInterpreterFuncEval(pThread);
-            }
-            EX_CATCH
-            {
-                pThread->SetFilterContext(NULL);
-                EX_RETHROW;
-            }
-            EX_END_CATCH
-            pThread->SetFilterContext(NULL);
+            g_pDebugInterface->ExecutePendingInterpreterFuncEval(pThread);
         }
+        EX_CATCH
+        {
+            pThread->SetFilterContext(NULL);
+            EX_RETHROW;
+        }
+        EX_END_CATCH
+        pThread->SetFilterContext(NULL);
+
+        // Restore bypass state that may have been overwritten during func eval.
+        pThreadContext->m_bypassAddress = savedBypassAddress;
+        pThreadContext->m_bypassOpcode = savedBypassOpcode;
+
+        // The debugger may have modified the IP via SetIP (e.g. the setip command).
+        // Return the potentially updated IP so the interpreter can resume from the
+        // new position.
+        return (const int32_t*)(TADDR)GetIP(&ctx);
     }
+    return ip;
 }
 #endif // DEBUGGING_SUPPORTED
 
@@ -1279,7 +1291,18 @@ SWITCH_OPCODE:
                 case INTOP_BREAKPOINT:
                 {
                     LOG((LF_CORDB, LL_INFO10000, "InterpExecMethod: Hit breakpoint at IP %p\n", ip));
-                    InterpBreakpoint(ip, pFrame, stack, pInterpreterFrame);
+                    const int32_t *newIp = InterpBreakpoint(ip, pFrame, stack, pInterpreterFrame);
+
+                    // The debugger may have changed the IP via setip. If so, update
+                    // the interpreter's bytecode IP and resume from the new location.
+                    if (newIp != ip)
+                    {
+                        LOG((LF_CORDB, LL_INFO10000, "InterpExecMethod: SetIP changed IP from %p to %p\n", ip, newIp));
+                        ip = newIp;
+                        pFrame->ip = ip;
+                        opcode = *ip;
+                        goto SWITCH_OPCODE;
+                    }
 
                     int32_t bypassOpcode = 0;
                     

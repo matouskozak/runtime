@@ -28,10 +28,6 @@
 #include "dbgtransportsession.h"
 #endif // FEATURE_DBGIPC_TRANSPORT_VM
 
-#ifdef FEATURE_INTERPRETER
-#include "../../vm/interpexec.h"
-#endif // FEATURE_INTERPRETER
-
 #ifdef TEST_DATA_CONSISTENCY
 #include "datatest.h"
 #endif // TEST_DATA_CONSISTENCY

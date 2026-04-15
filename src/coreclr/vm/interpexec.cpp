@@ -722,6 +722,8 @@ static const int32_t* InterpBreakpoint(const int32_t *ip, const InterpMethodCont
         EX_CATCH
         {
             pThread->SetFilterContext(NULL);
+            pThreadContext->m_bypassAddress = savedBypassAddress;
+            pThreadContext->m_bypassOpcode = savedBypassOpcode;
             EX_RETHROW;
         }
         EX_END_CATCH

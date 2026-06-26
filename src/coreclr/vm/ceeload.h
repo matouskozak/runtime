@@ -609,6 +609,7 @@ class Module : public ModuleBase
 {
 #ifdef DACCESS_COMPILE
     friend class ClrDataAccess;
+    friend class DacDbiInterfaceImpl;
 #endif
 
     friend class DataImage;

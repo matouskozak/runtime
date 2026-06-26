@@ -1203,11 +1203,42 @@ BOOL StackFrameIterator::ResetRegDisp(PREGDISPLAY pRegDisp,
     {
         // CONTEXT is in interpreted code where the first-arg register holds the owning InterpreterFrame.
         // Skip past it so we don't re-enter its frame chain.
-        PTR_InterpreterFrame pOwningInterpFrame =
-            dac_cast<PTR_InterpreterFrame>((TADDR)GetFirstArgReg(m_crawl.pRD->pCurrentContext));
-        _ASSERTE(pOwningInterpFrame != NULL);
-        _ASSERTE(pOwningInterpFrame->GetFrameIdentifier() == FrameIdentifier::InterpreterFrame);
-        m_crawl.pFrame = pOwningInterpFrame->PtrNextFrame();
+        // However, when the debugger replays a saved context (e.g. ShimStackWalk::CheckInternalFrame
+        // calling SetContext), the first-arg register may not be correctly preserved. In that case,
+        // fall back to walking the frame chain to find the owning InterpreterFrame.
+        TADDR firstArgReg = (TADDR)GetFirstArgReg(m_crawl.pRD->pCurrentContext);
+        PTR_InterpreterFrame pOwningInterpFrame = NULL;
+
+        if (firstArgReg != 0)
+        {
+            PTR_InterpreterFrame pCandidate = dac_cast<PTR_InterpreterFrame>(firstArgReg);
+            if (pCandidate->GetFrameIdentifier() == FrameIdentifier::InterpreterFrame)
+            {
+                pOwningInterpFrame = pCandidate;
+            }
+        }
+
+        if (pOwningInterpFrame == NULL)
+        {
+            // Fallback: walk the frame chain to find the InterpreterFrame that owns the current SP.
+            PTR_Frame pFrame = m_crawl.pFrame;
+            TADDR curSP = GetRegdisplaySP(m_crawl.pRD);
+            while (pFrame != FRAME_TOP)
+            {
+                if (pFrame->GetFrameIdentifier() == FrameIdentifier::InterpreterFrame)
+                {
+                    pOwningInterpFrame = dac_cast<PTR_InterpreterFrame>(pFrame);
+                    break;
+                }
+                pFrame = pFrame->PtrNextFrame();
+            }
+        }
+
+        if (pOwningInterpFrame != NULL)
+        {
+            m_crawl.pFrame = pOwningInterpFrame->PtrNextFrame();
+        }
+        // else: no InterpreterFrame found — fall through to normal frame chain logic
     }
     else
 #endif // FEATURE_INTERPRETER
@@ -2551,6 +2582,23 @@ BOOL StackFrameIterator::CheckForSkippedFrames(void)
 {
     WRAPPER_NO_CONTRACT;
     SUPPORTS_DAC;
+
+#ifdef FEATURE_INTERPRETER
+    // Interpreter frames do not embed explicit frames (e.g. InlinedCallFrame for inline P/Invoke)
+    // within their managed stack frame range. The interpreter's P/Invoke InlinedCallFrames live in
+    // separate NOINLINE helper functions at strictly lower stack addresses. Attempting to walk the
+    // skipped-frames loop via VirtualUnwindInterpreterCallFrame here can crash in the DAC when the
+    // InterpMethodContextFrame is not accessible (e.g. during shim stack walks that reset the
+    // iterator to an interpreter context via SetContext).
+    // We still need to ensure the caller context is valid for downstream consumers (e.g. Filter's
+    // ExInfo::HasFrameBeenUnwoundByAnyActiveException which calls CallerStackFrame::FromRegDisplay).
+    if (m_cachedCodeInfo.IsInterpretedCode())
+    {
+        ICodeManager *pInterpCodeManager = m_crawl.GetCodeManager();
+        pInterpCodeManager->EnsureCallerContextIsValid(m_crawl.pRD, &m_cachedCodeInfo, m_codeManFlags);
+        return FALSE;
+    }
+#endif // FEATURE_INTERPRETER
 
     BOOL   fHandleSkippedFrames = FALSE;
     TADDR pvReferenceSP;

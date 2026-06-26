@@ -4423,6 +4423,10 @@ private:
     // See code:CordbModule::SetLoadEventContinueMarker for details
     UINT m_nLoadEventContinueCounter;
 
+    // Cached EnC state - set by SetJITCompilerFlags when the DAC reports success.
+    // Used by GetJITCompilerFlags to avoid re-reading from target (which may not persist writes).
+    BOOL m_fEnCEnabled;
+
     // This is a table of all NativeCode objects in the module indexed
     // by start address
     // The collection is filled lazily by LookupOrCreateNativeCode

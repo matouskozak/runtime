@@ -1416,10 +1416,12 @@ HRESULT ShimProcess::FilterSetJitFlagsHresult(HRESULT hr)
 {
     if ((hr == CORDBG_E_MUST_BE_IN_LOAD_MODULE) && !m_fInLoadModule)
     {
+        LOG((LF_CORDB, LL_INFO100, "SP::FSJFH: MUST_BE_IN_LOAD_MODULE and !InLoadModule, passing through\n"));
         return hr;
     }
     if (m_attached && (hr == CORDBG_E_MUST_BE_IN_LOAD_MODULE))
     {
+        LOG((LF_CORDB, LL_INFO100, "SP::FSJFH: attached && MUST_BE_IN_LOAD_MODULE, returning CANNOT_BE_ON_ATTACH\n"));
         return CORDBG_E_CANNOT_BE_ON_ATTACH;
     }
     return hr;

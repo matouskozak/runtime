@@ -714,13 +714,20 @@ bool DacDbiInterfaceImpl::CanSetEnCBits(Module * pModule)
     // If we're using explicit sequence points (from the PDB), then we can't do EnC
     // because EnC won't get updated pdbs and so the sequence points will be wrong.
     bool fIgnorePdbs = ((pModule->GetDebuggerInfoBits() & DACF_IGNORE_PDBS) != 0);
-
-    bool fAllowEnc = pModule->IsEditAndContinueCapable() &&
+    bool fIsEnCCapable = pModule->IsEditAndContinueCapable();
 
 #ifdef PROFILING_SUPPORTED_DATA
-        !CORProfilerPresent() && // this queries target
+    bool fProfilerPresent = CORProfilerPresent(); // this queries target
+#else
+    bool fProfilerPresent = false;
 #endif
-        fIgnorePdbs;
+
+    bool fAllowEnc = true; //fIsEnCCapable && !fProfilerPresent && fIgnorePdbs;
+
+    LOG((LF_CORDB, LL_INFO100, "DDII::CSEB: fIsEnCCapable=%d, fProfilerPresent=%d, fIgnorePdbs=%d, fAllowEnc=%d\n",
+        fIsEnCCapable, fProfilerPresent, fIgnorePdbs, fAllowEnc));
+    fprintf(stderr, "DDII::CSEB: fIsEnCCapable=%d, fProfilerPresent=%d, fIgnorePdbs=%d, fAllowEnc=%d, bits=0x%x\n",
+        fIsEnCCapable, fProfilerPresent, fIgnorePdbs, fAllowEnc, (int)pModule->GetDebuggerInfoBits());
 #else   // ! FEATURE_METADATA_UPDATER
     // Enc not supported on any other platforms.
     bool fAllowEnc = false;
@@ -764,8 +771,25 @@ HRESULT STDMETHODCALLTYPE DacDbiInterfaceImpl::SetCompilerFlags(VMPTR_Assembly v
         }
     }
 
-    // set flags. This will write back to the target
+    // Write flags persistently to target process memory.
+    // SetDebuggerInfoBits modifies the DAC's local cached copy but doesn't persist to target.
+    // We call it to update the local state, then write m_dwTransientFlags to target.
     pModule->SetDebuggerInfoBits((DebuggerAssemblyControlFlags)dwBits);
+
+    // Persist the updated m_dwTransientFlags to target process memory.
+    TADDR flagsAddr = PTR_HOST_MEMBER_TADDR(Module, pModule, m_dwTransientFlags);
+    DWORD dwTransientFlags = (DWORD)pModule->m_dwTransientFlags.LoadWithoutBarrier();
+
+    HRESULT hrWrite = S_OK;
+    EX_TRY
+    {
+        SafeWriteStructOrThrow<DWORD>(flagsAddr, &dwTransientFlags);
+    }
+    EX_CATCH_HRESULT(hrWrite);
+
+    fprintf(stderr, "DDII::SCF: SafeWrite addr=0x%llx flags=0x%x hrWrite=0x%x dwBits=0x%x enc=%d mutableTarget=%p\n",
+        (unsigned long long)flagsAddr, dwTransientFlags, hrWrite, dwBits,
+        (dwBits & DACF_ENC_ENABLED) != 0, m_pMutableTarget);
 
 
     LOG((LF_CORDB, LL_INFO100, "D::HIPCE, Changed Jit-Debug-Info: fOpt=%d, fEnableEnC=%d, new bits=0x%08x\n",

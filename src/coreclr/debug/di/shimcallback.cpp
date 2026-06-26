@@ -487,6 +487,10 @@ void ShimProxyCallback::FakeLoadModule(ICorDebugAppDomain *pAppDomain, ICorDebug
 
         HRESULT Dispatch(DispatchArgs args)
         {
+            // Set the load event continue marker so that SetJITCompilerFlags
+            // (specifically EnsureModuleIsInLoadCallback) succeeds during this callback.
+            static_cast<CordbModule*>(m_pModule.GetValue())->SetLoadEventContinueMarker();
+
             // signal that we are in the callback--this will be cleared in code:CordbProcess::ContinueInternal
             m_pShim->SetInLoadModule(true);
             return args.GetCallback1()->LoadModule(m_pAppDomain, m_pModule);

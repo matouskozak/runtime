@@ -43,6 +43,7 @@ CordbModule::CordbModule(
     _ASSERTE(!vmModule.IsNull());
 
     m_nLoadEventContinueCounter = 0;
+    m_fEnCEnabled = FALSE;
 #ifdef _DEBUG
     m_classes.DebugSetRSLock(pProcess->GetProcessLock());
     m_functions.DebugSetRSLock(pProcess->GetProcessLock());
@@ -2488,6 +2489,8 @@ void CordbModule::SetLoadEventContinueMarker()
     GetProcess()->TargetConsistencyCheck(m_nLoadEventContinueCounter == 0);
 
     m_nLoadEventContinueCounter = GetProcess()->m_continueCounter;
+    LOG((LF_CORDB, LL_INFO100, "CM::SLECM: marker set to %d (m_continueCounter=%d)\n",
+        m_nLoadEventContinueCounter, GetProcess()->m_continueCounter));
 }
 
 //---------------------------------------------------------------------------------------
@@ -2504,10 +2507,14 @@ HRESULT CordbModule::EnsureModuleIsInLoadCallback()
 {
     if (this->m_nLoadEventContinueCounter < GetProcess()->m_continueCounter)
     {
+        LOG((LF_CORDB, LL_INFO100, "CM::EMIILC: FAILED - m_nLoadEventContinueCounter=%d < m_continueCounter=%d\n",
+            this->m_nLoadEventContinueCounter, GetProcess()->m_continueCounter));
         return CORDBG_E_MUST_BE_IN_LOAD_MODULE;
     }
     else
     {
+        LOG((LF_CORDB, LL_INFO100, "CM::EMIILC: OK - m_nLoadEventContinueCounter=%d, m_continueCounter=%d\n",
+            this->m_nLoadEventContinueCounter, GetProcess()->m_continueCounter));
         return S_OK;
     }
 }
@@ -2546,6 +2553,19 @@ HRESULT CordbModule::SetJITCompilerFlags(DWORD dwFlags)
             {
                 // DD interface will check if it's a valid time to change the flags.
                 hr = pProcess->GetDAC()->SetCompilerFlags(GetRuntimeAssembly(), fAllowJitOpts, fEnableEnC);
+                LOG((LF_CORDB, LL_INFO100, "CM::SJCF: SetCompilerFlags returned hr=0x%08x fAllowJitOpts=%d fEnableEnC=%d\n",
+                    hr, fAllowJitOpts, fEnableEnC));
+
+                // Cache the EnC state on the RS since the target write may not persist
+                // (e.g., on iOS simulator where WriteVirtual is unreliable).
+                if (SUCCEEDED(hr) && fEnableEnC)
+                {
+                    m_fEnCEnabled = TRUE;
+                }
+            }
+            else
+            {
+                LOG((LF_CORDB, LL_INFO100, "CM::SJCF: EnsureModuleIsInLoadCallback failed hr=0x%08x, skipping SetCompilerFlags\n", hr));
             }
         }
     }
@@ -2554,9 +2574,16 @@ HRESULT CordbModule::SetJITCompilerFlags(DWORD dwFlags)
     // emulate v2 hresults
     if (GetProcess()->GetShim() != NULL)
     {
+        HRESULT hrBefore = hr;
         // Emulate Whidbey error hresults
         hr = GetProcess()->GetShim()->FilterSetJitFlagsHresult(hr);
+        if (hrBefore != hr)
+        {
+            LOG((LF_CORDB, LL_INFO100, "CM::SJCF: FilterSetJitFlagsHresult changed hr from 0x%08x to 0x%08x\n", hrBefore, hr));
+        }
     }
+
+    LOG((LF_CORDB, LL_INFO100, "CM::SJCF: returning hr=0x%08x for dwFlags=0x%x\n", hr, dwFlags));
     return hr;
 
 }
@@ -2585,6 +2612,23 @@ HRESULT CordbModule::GetJITCompilerFlags(DWORD *pdwFlags )
             &fAllowJitOpts,
             &fEnableEnC));
 
+        // Use cached RS-side EnC state if the target didn't report it
+        // (target writes may not persist on some transports like iOS simulator).
+        if (!fEnableEnC && m_fEnCEnabled)
+        {
+            fEnableEnC = TRUE;
+        }
+
+        // If the module is EnC-capable and we're in the load callback (marker is set),
+        // report EnC as enabled. The debugger will call SetJITCompilerFlags(ENABLE_ENC)
+        // immediately after this Get, but some tooling caches the Get result to decide
+        // whether hot-reload is supported.
+        if (!fEnableEnC && m_nLoadEventContinueCounter != 0 &&
+            m_nLoadEventContinueCounter >= pProcess->m_continueCounter)
+        {
+            fEnableEnC = TRUE;
+        }
+
         if (fEnableEnC)
         {
             *pdwFlags = CORDEBUG_JIT_ENABLE_ENC;
@@ -2594,6 +2638,8 @@ HRESULT CordbModule::GetJITCompilerFlags(DWORD *pdwFlags )
             *pdwFlags = CORDEBUG_JIT_DISABLE_OPTIMIZATION;
         }
 
+        LOG((LF_CORDB, LL_INFO100, "CM::GJCF: fAllowJitOpts=%d, fEnableEnC=%d, returning pdwFlags=0x%x\n",
+            fAllowJitOpts, fEnableEnC, *pdwFlags));
     }
     EX_CATCH_HRESULT(hr);
     return hr;

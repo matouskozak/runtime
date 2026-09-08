@@ -394,6 +394,26 @@ void PrepareForUnmanagedCallersOnlyCall(MethodDesc* pMethodDesc);
 class UnmanagedCallersOnlyCaller final
 {
     MethodDesc* _pMD;
+
+    PCODE GetEntryPoint()
+    {
+        CONTRACTL
+        {
+            THROWS;
+            GC_TRIGGERS;
+            MODE_PREEMPTIVE;
+        }
+        CONTRACTL_END;
+
+#ifdef DEBUGGING_SUPPORTED
+        PrepareForUnmanagedCallersOnlyCall(_pMD);
+#endif // DEBUGGING_SUPPORTED
+
+        PCODE methodEntry = _pMD->GetSingleCallableAddrOfCodeForUnmanagedCallersOnly();
+        _ASSERTE(methodEntry != (PCODE)NULL);
+        return methodEntry;
+    }
+
 public:
     explicit UnmanagedCallersOnlyCaller(BinderMethodID id)
         : _pMD{}
@@ -440,12 +460,7 @@ public:
         {
             GCX_PREEMP();
 
-#ifdef DEBUGGING_SUPPORTED
-            PrepareForUnmanagedCallersOnlyCall(_pMD);
-#endif // DEBUGGING_SUPPORTED
-
-            PCODE methodEntry = _pMD->GetSingleCallableAddrOfCodeForUnmanagedCallersOnly();
-            _ASSERTE(methodEntry != (PCODE)NULL);
+            PCODE methodEntry = GetEntryPoint();
 
             // Cast the function pointer to the appropriate type.
             // Note that we append the exception handle argument.
@@ -493,8 +508,7 @@ public:
         {
             GCX_PREEMP();
 
-            PCODE methodEntry = _pMD->GetSingleCallableAddrOfCodeForUnmanagedCallersOnly();
-            _ASSERTE(methodEntry != (PCODE)NULL);
+            PCODE methodEntry = GetEntryPoint();
 
             // Cast the function pointer to the appropriate type.
             // Note that we append the exception handle argument.
@@ -530,8 +544,7 @@ public:
 
         GCX_PREEMP();
 
-        PCODE methodEntry = _pMD->GetSingleCallableAddrOfCodeForUnmanagedCallersOnly();
-        _ASSERTE(methodEntry != (PCODE)NULL);
+        PCODE methodEntry = GetEntryPoint();
 
         auto fptr = reinterpret_cast<void(*)(Args...)>(methodEntry);
         fptr(args...);
@@ -554,8 +567,7 @@ public:
 
         GCX_PREEMP();
 
-        PCODE methodEntry = _pMD->GetSingleCallableAddrOfCodeForUnmanagedCallersOnly();
-        _ASSERTE(methodEntry != (PCODE)NULL);
+        PCODE methodEntry = GetEntryPoint();
 
         auto fptr = reinterpret_cast<Ret(*)(Args...)>(methodEntry);
         return fptr(args...);

@@ -83,11 +83,11 @@ const int32_t* InterpreterWalker::GetBranchTarget() const
 
 MethodDesc* InterpreterWalker::GetDirectCallTarget() const
 {
-    if ((m_opcode != INTOP_CALL && m_opcode != INTOP_CALL_NULLCHECK) || m_pInterpMethod == NULL)
+    if (!InterpOpIsDirectCall(m_opcode) || m_pInterpMethod == NULL)
         return NULL;
 
     _ASSERTE(m_pInterpMethod->CheckIntegrity());
-    int32_t methodSlot = m_ip[3];
+    int32_t methodSlot = m_ip[m_opcode == INTOP_NEWOBJ_GENERIC ? 4 : 3];
     return (MethodDesc*)m_pInterpMethod->pDataItems[methodSlot];
 }
 

@@ -5371,14 +5371,17 @@ InterpreterStepHelper::StepSetupResult InterpreterStepHelper::SetupStep(
 #if defined(FEATURE_CODE_VERSIONING) && defined(FEATURE_READYTORUN)
                 MethodDesc* targetMethod = interpWalker.GetDirectCallTarget();
                 PCODE targetCode = targetMethod != NULL ? targetMethod->GetNativeCode() : (PCODE)NULL;
-                bool targetIsReadyToRun =
-                    targetCode != (PCODE)NULL &&
-                    ExecutionManager::IsReadyToRunCode(targetCode);
+                // A cold target can select R2R code when its prestub runs.
+                bool targetMayUseReadyToRun =
+                    targetMethod != NULL &&
+                    (targetCode == (PCODE)NULL
+                        ? targetMethod->GetModule()->IsReadyToRun()
+                        : ExecutionManager::IsReadyToRunCode(targetCode));
                 LOG((LF_CORDB, LL_INFO10000,
-                    "ISH::SS: Direct call target %p isReadyToRun=%d\n",
+                    "ISH::SS: Direct call target %p mayUseReadyToRun=%d\n",
                     targetMethod,
-                    targetIsReadyToRun));
-                if (targetIsReadyToRun)
+                    targetMayUseReadyToRun));
+                if (targetMayUseReadyToRun)
                 {
                     m_pStepper->RequestDeoptimization(targetMethod);
                 }

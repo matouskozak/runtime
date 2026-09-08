@@ -2021,6 +2021,17 @@ BOOL DebuggerController::AddBindAndActivateILReplicaPatch(DebuggerControllerPatc
     BOOL result = FALSE;
     MethodDesc* pMD = dji->m_nativeCodeVersion.GetMethodDesc();
 
+#if defined(FEATURE_INTERPRETER) && defined(FEATURE_CODE_VERSIONING) && defined(FEATURE_READYTORUN) && !defined(FEATURE_DYNAMIC_CODE_COMPILED)
+    if (primary->offsetIsIL && ExecutionManager::IsReadyToRunCode((PCODE)dji->m_addrOfCode))
+    {
+        // Deoptimization retains the R2R body. Keep the primary patch pending for interpreter code.
+        LOG((LF_CORDB, LL_INFO10000,
+            "DC::ABAI: Deferring IL breakpoint for R2R code at %p until interpreter code is available\n",
+            CORDB_ADDRESS_TO_PTR(dji->m_addrOfCode)));
+        return TRUE;
+    }
+#endif
+
     if (primary->offsetIsIL == 0)
     {
         // Zero is the only native offset that we allow to bind across different jitted

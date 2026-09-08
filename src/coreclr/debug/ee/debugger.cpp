@@ -10328,15 +10328,36 @@ bool Debugger::HandleIPCEvent(DebuggerIPCEvent * pEvent)
 
             DebuggerModule * pDebuggerModule = LookupOrCreateModule(pEvent->BreakpointData.vmAssembly);
             Module * pModule = pDebuggerModule->GetRuntimeModule();
+
+#if defined(FEATURE_INTERPRETER) && defined(FEATURE_CODE_VERSIONING) && defined(FEATURE_READYTORUN) && !defined(FEATURE_DYNAMIC_CODE_COMPILED)
+            // Select the interpreter version before binding, including for methods not yet loaded.
+            // EnC-enabled modules manage their own IL versions.
+            if (pEvent->BreakpointData.isIL && pModule->IsReadyToRun() && !pModule->IsEditAndContinueEnabled())
+            {
+                EX_TRY
+                {
+                    GCX_PREEMP();
+                    BOOL isDeoptimized = FALSE;
+                    hr = IsMethodDeoptimized(pModule, pEvent->BreakpointData.funcMetadataToken, &isDeoptimized);
+                    if (SUCCEEDED(hr) && !isDeoptimized)
+                    {
+                        hr = DeoptimizeMethodHelper(pModule, pEvent->BreakpointData.funcMetadataToken);
+                    }
+                }
+                EX_CATCH_HRESULT(hr);
+            }
+#endif
+
             DebuggerMethodInfo * pDMI = GetOrCreateMethodInfo(pModule, pEvent->BreakpointData.funcMetadataToken);
             MethodDesc * pMethodDesc = pEvent->BreakpointData.nativeCodeMethodDescToken.UnWrap();
 
             DebuggerJitInfo * pDJI =  NULL;
-            if ((pMethodDesc != NULL) && (pDMI != NULL))
+            if (SUCCEEDED(hr) && (pMethodDesc != NULL) && (pDMI != NULL))
             {
                 pDJI = pDMI->FindOrCreateInitAndAddJitInfo(pMethodDesc, PINSTRToPCODE(dac_cast<TADDR>(pEvent->BreakpointData.codeStartAddress)));
             }
 
+            if (SUCCEEDED(hr))
             {
                 // If we haven't been either JITted or EnC'd yet, then
                 // we'll put a patch in by offset, implicitly relative

@@ -1527,7 +1527,8 @@ SWITCH_OPCODE:
                     {
                         // ip[1] holds the native offset of the first INTOP_DEBUG_SEQ_POINT,
                         // or -1 if none. This is patched by the compiler during code emission.
-                        const int32_t *callbackIp = ip;
+                        // Without a sequence point, patch the next opcode, not the one already executing.
+                        const int32_t *callbackIp = ip + 2;
                         int32_t seqPointOffset = ip[1];
                         if (seqPointOffset >= 0)
                         {

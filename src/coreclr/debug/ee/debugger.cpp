@@ -12035,6 +12035,13 @@ HRESULT Debugger::DeoptimizeMethodHelper(Module* pModule, mdMethodDef methodDef)
     LOG((LF_TIEREDCOMPILATION, LL_INFO100, "Debugger::DeoptimizeMethodHelper Module=%p Method=0x%08x\n",
         pModule, methodDef));
 
+    MethodDesc* pMethodDesc = pModule->LookupMethodDef(methodDef);
+    if (pMethodDesc != nullptr && !pMethodDesc->IsVersionable())
+    {
+        LOG((LF_CORDB, LL_INFO10000, "Debugger::DeoptimizeMethodHelper method %p does not support versioning\n", pMethodDesc));
+        return CORDBG_E_CODE_NOT_AVAILABLE;
+    }
+
     {
         CodeVersionManager::LockHolder codeVersioningLockHolder;
         if (FAILED(hr = pCodeVersionManager->AddILCodeVersion(pModule, methodDef, &ilCodeVersion, TRUE, CodeVersionSource::kReJIT)))
@@ -12053,7 +12060,13 @@ HRESULT Debugger::DeoptimizeMethodHelper(Module* pModule, mdMethodDef methodDef)
 
     _ASSERTE(!ilCodeVersion.IsNull());
     {
-        if (FAILED(hr = pCodeVersionManager->SetActiveILCodeVersions(&ilCodeVersion, 1, NULL)))
+        CDynArray<CodeVersionManager::CodePublishError> errors;
+        hr = pCodeVersionManager->SetActiveILCodeVersions(&ilCodeVersion, 1, &errors);
+        if (SUCCEEDED(hr) && errors.Count() != 0)
+        {
+            hr = errors[0].hrStatus;
+        }
+        if (FAILED(hr))
         {
             LOG((LF_TIEREDCOMPILATION, LL_INFO100, "Debugger::DeoptimizeMethodHelper SetActiveILCodeVersions returned hr 0x%x\n",
                 hr));

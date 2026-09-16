@@ -1967,7 +1967,8 @@ void DbgTransportSession::TransportWorker()
                                        true);
                 if (SUCCEEDED(hr))
                 {
-                    if (!ReceiveBlock(sReceiveHeader.TypeSpecificData.MemoryAccess.m_pbLeftSideBuffer,
+                    if (sReceiveHeader.m_cbDataBlock &&
+                        !ReceiveBlock(sReceiveHeader.TypeSpecificData.MemoryAccess.m_pbLeftSideBuffer,
                                       sReceiveHeader.TypeSpecificData.MemoryAccess.m_cbLeftSideBuffer))
                         HANDLE_TRANSIENT_ERROR();
                 }

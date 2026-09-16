@@ -585,7 +585,7 @@ private:
             memset(this, 0, sizeof(*this));
             m_sHeader.m_eType = eType;
             m_sHeader.m_cbDataBlock = cbBufferIn;
-            m_pbDataBlock = pbBufferIn;
+            m_pbDataBlock = cbBufferIn == 0 ? nullptr : pbBufferIn;
             m_cbDataBlock = cbBufferIn;
             m_pbReplyBlock = pbBufferOut;
             m_cbReplyBlock = cbBufferOut;

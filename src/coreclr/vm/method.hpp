@@ -1233,7 +1233,7 @@ public:
     bool IsVersionable()
     {
         WRAPPER_NO_CONTRACT;
-        return IsEligibleForTieredCompilation() || IsEligibleForReJIT() || IsEligibleForEnC();
+        return IsEligibleForTieredCompilation() || IsEligibleForReJIT() || IsEligibleForEnC() || IsEligibleForInterpreterVersioning();
     }
 
     // True iff all calls to the method should funnel through a Precode which can be updated to point to the current method
@@ -1286,6 +1286,22 @@ public:
             // EnC edits are expressed as IL, wrapper stubs have no editable IL body
             IsIL() &&
             !IsWrapperStub();
+    }
+
+    bool IsEligibleForInterpreterVersioning()
+    {
+        WRAPPER_NO_CONTRACT;
+
+#if defined(FEATURE_INTERPRETER) && defined(FEATURE_CODE_VERSIONING) && !defined(FEATURE_DYNAMIC_CODE_COMPILED)
+        // Keep in sync with MethodTableBuilder::NeedsNativeCodeSlot.
+        return HasNativeCodeSlot() &&
+            IsIL() &&
+            !IsWrapperStub() &&
+            GetModule()->IsReadyToRun() &&
+            CodeVersionManager::IsMethodSupported(PTR_MethodDesc(this));
+#else
+        return false;
+#endif
     }
 
 public:

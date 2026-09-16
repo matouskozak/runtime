@@ -1461,6 +1461,13 @@ CORJIT_FLAGS VersionedPrepareCodeConfig::GetJitCompilationFlags()
 #ifdef FEATURE_REJIT
     DWORD profilerFlags = m_ilCodeVersion.GetJitFlags();
     flags.Add(ReJitManager::JitFlagsFromProfCodegenFlags(profilerFlags));
+#else
+    // Debugger deoptimization also produces interpreter code without profiler ReJIT.
+    if (m_ilCodeVersion.IsDeoptimized())
+    {
+        flags.Set(CORJIT_FLAGS::CORJIT_FLAG_DEBUG_CODE);
+        flags.Set(CORJIT_FLAGS::CORJIT_FLAG_DEBUG_INFO);
+    }
 #endif
 
 #ifdef FEATURE_TIERED_COMPILATION

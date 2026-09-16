@@ -7344,6 +7344,17 @@ MethodTableBuilder::NeedsNativeCodeSlot(bmtMDMethod * pMDMethod)
 {
     LIMITED_METHOD_CONTRACT;
 
+#if defined(FEATURE_INTERPRETER) && defined(FEATURE_CODE_VERSIONING) && !defined(FEATURE_DYNAMIC_CODE_COMPILED)
+    // Keep the original R2R body separate from the redirectable entry point.
+    // Keep in sync with MethodDesc::IsEligibleForInterpreterVersioning.
+    if (GetModule()->IsReadyToRun() &&
+        !GetModule()->IsCollectible() &&
+        (pMDMethod->GetMethodType() == mcIL || pMDMethod->GetMethodType() == mcInstantiated))
+    {
+        return TRUE;
+    }
+#endif
+
 #ifdef FEATURE_TIERED_COMPILATION
     // Keep in-sync with MethodDesc::DetermineAndSetIsEligibleForTieredCompilation()
     if ((g_pConfig->TieredCompilation() &&

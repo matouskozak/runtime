@@ -2838,7 +2838,11 @@ LONG NotifyDebuggerLastChance(Thread *pThread,
                               EXCEPTION_POINTERS *pExceptionInfo,
                               BOOL jitAttachRequested)
 {
+#ifdef FEATURE_INTERPRETER
+    STATIC_CONTRACT_THROWS;
+#else
     STATIC_CONTRACT_NOTHROW;
+#endif
     STATIC_CONTRACT_GC_TRIGGERS;
     STATIC_CONTRACT_MODE_ANY;
 
@@ -2868,6 +2872,10 @@ LONG NotifyDebuggerLastChance(Thread *pThread,
     }
 
 #ifdef DEBUGGER_EXCEPTION_INTERCEPTION_SUPPORTED
+#ifdef FEATURE_INTERPRETER
+    TADDR resumeSP = 0;
+    TADDR resumeIP = 0;
+#endif
     EX_TRY
     {
         // if the debugger wants to intercept the unhandled exception then we immediately unwind without returning
@@ -2880,13 +2888,32 @@ LONG NotifyDebuggerLastChance(Thread *pThread,
         {
             // The debugger wants to intercept this exception.  It may return in a failure case, in which case we want
             // to continue thru this path.
-            ClrDebuggerDoUnwindAndIntercept(X86_FIRST_ARG(EXCEPTION_CHAIN_END) pExceptionInfo->ExceptionRecord);
+#ifdef FEATURE_INTERPRETER
+            try
+            {
+#endif
+                ClrDebuggerDoUnwindAndIntercept(X86_FIRST_ARG(EXCEPTION_CHAIN_END) pExceptionInfo->ExceptionRecord);
+#ifdef FEATURE_INTERPRETER
+            }
+            catch (const ResumeAfterCatchException& ex)
+            {
+                // This is an interpreter control transfer, not an interception failure.
+                ex.GetResumeContext(&resumeSP, &resumeIP);
+            }
+#endif
         }
     }
     EX_CATCH // if we fail to intercept just continue as is
     {
     }
     EX_END_CATCH
+#ifdef FEATURE_INTERPRETER
+    if (resumeSP != 0)
+    {
+        // Rethrow outside the catch scopes to preserve the Windows shadow-stack workaround.
+        ThrowResumeAfterCatchException(resumeSP, resumeIP);
+    }
+#endif
 #endif // DEBUGGER_EXCEPTION_INTERCEPTION_SUPPORTED
 
     return retval;

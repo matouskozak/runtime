@@ -1,4 +1,4 @@
-# Test-only pipeline for full Apple device tests on scouting queues. Do not merge.
+# Test-only pipeline for inner-loop Apple device tests on scouting queues. Do not merge.
 trigger: none
 
 pr:
@@ -47,14 +47,13 @@ extends:
           jobParameters:
             testGroup: innerloop
             nameSuffix: AllSubsets_NativeAOT
-            buildArgs: --cross -s clr.alljits+clr.tools+clr.nativeaotruntime+clr.nativeaotlibs+libs+libs.tests -c $(_BuildConfig) -testscope all /p:ArchiveTests=true $(_runSmokeTestsOnlyArg) /p:DevTeamProvisioning=- /p:BuildTestsOnHelix=true /p:UseNativeAOTRuntime=true /p:RunAOTCompilation=false /p:ContinuousIntegrationBuild=true
+            buildArgs: --cross -s clr.alljits+clr.tools+clr.nativeaotruntime+clr.nativeaotlibs+libs+libs.tests -c $(_BuildConfig) /p:ArchiveTests=true $(_runSmokeTestsOnlyArg) /p:DevTeamProvisioning=- /p:BuildTestsOnHelix=true /p:UseNativeAOTRuntime=true /p:RunAOTCompilation=false /p:ContinuousIntegrationBuild=true
             timeoutInMinutes: 360
             useNativeAOTRuntime: true
             postBuildSteps:
               - template: /eng/pipelines/libraries/helix.yml
                 parameters:
                   creator: dotnet-bot
-                  testScope: all
                   testRunNamePrefixSuffix: NativeAOT_$(_BuildConfig)
                   useHelixMonitor: ${{ variables.enableHelixJobMonitor }}
                   extraHelixArguments: /p:NeedsToBuildAppsOnHelix=true
@@ -71,13 +70,12 @@ extends:
           jobParameters:
             testGroup: innerloop
             nameSuffix: AllSubsets_CoreCLR
-            buildArgs: -s clr+clr.runtime+libs+packs+libs.tests -c $(_BuildConfig) -testscope all /p:ArchiveTests=true /p:DevTeamProvisioning=- /p:UseMonoRuntime=false /p:UseNativeAOTRuntime=false $(_runSmokeTestsOnlyArg) /p:BuildTestsOnHelix=true /p:UsePortableRuntimePack=false
+            buildArgs: -s clr+clr.runtime+libs+packs+libs.tests -c $(_BuildConfig) /p:ArchiveTests=true /p:DevTeamProvisioning=- /p:UseMonoRuntime=false /p:UseNativeAOTRuntime=false $(_runSmokeTestsOnlyArg) /p:BuildTestsOnHelix=true /p:UsePortableRuntimePack=false
             timeoutInMinutes: 240
             postBuildSteps:
               - template: /eng/pipelines/libraries/helix.yml
                 parameters:
                   creator: dotnet-bot
-                  testScope: all
                   testRunNamePrefixSuffix: CoreCLR_$(_BuildConfig)
                   useHelixMonitor: ${{ variables.enableHelixJobMonitor }}
                   extraHelixArguments: /p:NeedsToBuildAppsOnHelix=true
@@ -94,13 +92,12 @@ extends:
           jobParameters:
             testGroup: innerloop
             nameSuffix: AllSubsets_CoreCLR
-            buildArgs: -s clr+clr.runtime+libs+packs+libs.tests -c $(_BuildConfig) -testscope all /p:ArchiveTests=true /p:DevTeamProvisioning=- /p:UseMonoRuntime=false /p:UseNativeAOTRuntime=false $(_runSmokeTestsOnlyArg) /p:BuildTestsOnHelix=true /p:EnableAdditionalTimezoneChecks=true /p:UsePortableRuntimePack=false /p:EnableAggressiveTrimming=true
+            buildArgs: -s clr+clr.runtime+libs+packs+libs.tests -c $(_BuildConfig) /p:ArchiveTests=true /p:DevTeamProvisioning=- /p:UseMonoRuntime=false /p:UseNativeAOTRuntime=false $(_runSmokeTestsOnlyArg) /p:BuildTestsOnHelix=true /p:EnableAdditionalTimezoneChecks=true /p:UsePortableRuntimePack=false /p:EnableAggressiveTrimming=true
             timeoutInMinutes: 240
             postBuildSteps:
               - template: /eng/pipelines/libraries/helix.yml
                 parameters:
                   creator: dotnet-bot
-                  testScope: all
                   testRunNamePrefixSuffix: CoreCLR_$(_BuildConfig)
                   useHelixMonitor: ${{ variables.enableHelixJobMonitor }}
                   extraHelixArguments: /p:NeedsToBuildAppsOnHelix=true
@@ -127,14 +124,14 @@ extends:
             - name: timeoutPerTestCollectionInMinutes
               value: 180
           jobParameters:
-            testGroup: outerloop
+            testGroup: innerloop
             nameSuffix: AllSubsets_CoreCLR_RuntimeTests
             buildArgs: -s clr+libs -c $(_BuildConfig)
             timeoutInMinutes: 240
             extraVariablesTemplates:
               - template: /eng/pipelines/common/templates/runtimes/test-variables.yml
                 parameters:
-                  testGroup: outerloop
+                  testGroup: innerloop
             postBuildSteps:
               - template: /eng/pipelines/common/templates/runtimes/build-runtime-tests-and-send-to-helix.yml
                 parameters:
@@ -166,14 +163,14 @@ extends:
             - name: timeoutPerTestCollectionInMinutes
               value: 180
           jobParameters:
-            testGroup: outerloop
+            testGroup: innerloop
             nameSuffix: AllSubsets_NativeAOT_RuntimeTests
             buildArgs: --cross -s clr.alljits+clr.tools+clr.nativeaotruntime+clr.nativeaotlibs+libs -c $(_BuildConfig)
             timeoutInMinutes: 360
             extraVariablesTemplates:
               - template: /eng/pipelines/common/templates/runtimes/test-variables.yml
                 parameters:
-                  testGroup: outerloop
+                  testGroup: innerloop
                   useNativeAOTRuntime: true
             postBuildSteps:
               - template: /eng/pipelines/common/templates/runtimes/build-runtime-tests-and-send-to-helix.yml

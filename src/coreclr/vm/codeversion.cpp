@@ -1653,7 +1653,12 @@ HRESULT CodeVersionManager::SetActiveILCodeVersions(ILCodeVersion* pActiveVersio
     // for each ILCodeVersion in activeVersions, this lists the set
     // MethodDescs that will need to be updated
     CDynArray<CDynArray<MethodDesc*>> methodDescsToUpdate;
-    CDynArray<CodePublishError> errorRecords;
+    CDynArray<CodePublishError> localErrors;
+    if (pErrors == nullptr)
+    {
+        pErrors = &localErrors;
+    }
+
     for (DWORD i = 0; i < cActiveVersions; i++)
     {
         CDynArray<MethodDesc*>* pMethodDescs = methodDescsToUpdate.Append();
@@ -1678,7 +1683,7 @@ HRESULT CodeVersionManager::SetActiveILCodeVersions(ILCodeVersion* pActiveVersio
                     pAsyncVariant,
                     false,
                     pMethodDescs,
-                    &errorRecords)))
+                    pErrors)))
             {
                 _ASSERTE(hr == E_OUTOFMEMORY);
                 return hr;
@@ -1689,7 +1694,7 @@ HRESULT CodeVersionManager::SetActiveILCodeVersions(ILCodeVersion* pActiveVersio
                 pLoadedMethodDesc,
                 redirectAsyncThunk,
                 pMethodDescs,
-                &errorRecords)))
+                pErrors)))
         {
             _ASSERTE(hr == E_OUTOFMEMORY);
             return hr;
@@ -1725,7 +1730,7 @@ HRESULT CodeVersionManager::SetActiveILCodeVersions(ILCodeVersion* pActiveVersio
                 // Failing to publish is non-fatal, but we do record it so the caller is aware
                 if (FAILED(hr = PublishNativeCodeVersion(methodDescs[j], activeNativeChild)))
                 {
-                    if (FAILED(hr = AddCodePublishError(activeILVersion.GetModule(), activeILVersion.GetMethodDef(), methodDescs[j], hr, &errorRecords)))
+                    if (FAILED(hr = AddCodePublishError(activeILVersion.GetModule(), activeILVersion.GetMethodDef(), methodDescs[j], hr, pErrors)))
                     {
                         _ASSERTE(hr == E_OUTOFMEMORY);
                         return hr;
